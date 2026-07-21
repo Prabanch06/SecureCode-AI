@@ -1,0 +1,30 @@
+# --- Build Stage ---
+FROM node:20-slim AS build
+
+WORKDIR /app
+
+# Copy package config and lockfile
+COPY frontend/package*.json ./
+
+# Install dependencies
+RUN npm ci --include=dev
+
+# Copy frontend source code
+COPY frontend/ ./
+
+# Build the React/TypeScript SPA
+RUN npm run build
+
+# --- Production Stage ---
+FROM nginx:alpine
+
+# Copy build artifacts from build stage to Nginx web root
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Copy custom Nginx configuration
+COPY devops/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose HTTP port
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

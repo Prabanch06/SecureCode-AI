@@ -1,0 +1,929 @@
+{
+  "scans": [
+    {
+      "project": "AI health Care",
+      "language": "TypeScript",
+      "code": "import express from 'express';\nimport { createServer as createViteServer } from 'vite';\nimport http from 'http';\nimport { WebSocketServer } from 'ws';\nimport { setupWebSocket } from './websocket_manager';\nimport authRoutes from './auth';\nimport analyticsRoutes from './analytics_engine';\nimport aiRoutes from './ai_engine';\nimport { initDb } from './database';\nimport net from 'net';\n\nasync function getFreePort(startPort: number): Promise<number> {\n  return new Promise((resolve) => {\n    const srv = net.createServer();\n    srv.listen(startPort, '0.0.0.0', () => {\n      const port = (srv.address() as net.AddressInfo).port;\n      srv.close(() => resolve(port));\n    });\n    srv.on('error', () => {\n      resolve(getFreePort(startPort + 1));\n    });\n  });\n}\n\nasync function startServer() {\n  const app = express();\n  const startPort = Number(process.env.PORT) || 3001;\n  const port = await getFreePort(startPort);\n\n  // Initialize DB\n  initDb();\n\n  app.use(express.json());\n\n  // API routes\n  app.use('/api/auth', authRoutes);\n  app.use('/api/analytics', analyticsRoutes);\n  app.use('/api/ai', aiRoutes);\n\n  app.get('/api/health', (req, res) => {\n    res.json({ status: 'ok' });\n  });\n\n  // Create HTTP server\n  const server = http.createServer(app);\n\n  // Setup WebSocket server\n  const wss = new WebSocketServer({ server });\n  setupWebSocket(wss);\n\n  // Vite middleware for development\n  if (process.env.NODE_ENV !== 'production') {\n    const hmrPort = await getFreePort(24678);\n    const vite = await createViteServer({\n      server: {\n        middlewareMode: true,\n        hmr: { port: hmrPort }\n      },\n      appType: 'spa',\n    });\n    app.use(vite.middlewares);\n  } else {\n    app.use(express.static('dist'));\n    // Fallback for SPA routing\n    app.get('*', (req, res) => {\n      res.sendFile('index.html', { root: 'dist' });\n    });\n  }\n\n  server.on('error', (e: any) => {\n    console.error(e);\n  });\n\n  server.on('listening', () => {\n    console.log(`Server running on http://localhost:${port}`);\n  });\n\n  server.listen(port, '0.0.0.0');\n}\n\nstartServer();\n",
+      "scores": {
+        "readability": 85,
+        "maintainability": 80,
+        "security": 60,
+        "performance": 75,
+        "overall": 75
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": 10,
+          "issue": "Recursive `getFreePort` error handling could lead to stack overflow or unexpected behavior.",
+          "suggestedFix": "Refactor `getFreePort` to use an iterative approach instead of recursion to prevent potential stack overflow in extreme scenarios. Also, refine error handling to differentiate between `EADDRINUSE` and other network errors, potentially throwing if a port cannot be found after a reasonable number of retries."
+        },
+        {
+          "severity": "Low",
+          "line": 64,
+          "issue": "Generic HTTP server error handling logs the error but takes no corrective action.",
+          "suggestedFix": "Implement more robust error handling for the main HTTP server. For example, log the error with a proper logging library, and for critical errors (e.g., port already in use on startup), gracefully shut down the application or attempt to re-listen on another port. Avoid `any` type for error objects."
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "riskLevel": "High",
+          "name": "Missing Security Headers",
+          "impact": "Lack of security headers (like X-XSS-Protection, Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options, Content-Security-Policy) makes the application vulnerable to common web attacks such as XSS, clickjacking, and MIME-type sniffing.",
+          "recommendation": "Integrate a security middleware like Helmet.js to automatically set various HTTP headers that help protect the application from well-known web vulnerabilities. Apply it early in the Express middleware chain: `app.use(helmet());`"
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "Undefined WebSocket Authentication/Authorization",
+          "impact": "The `setupWebSocket` function is external, but the current server setup doesn't explicitly show any authentication or authorization mechanisms for WebSocket connections. This could allow unauthorized access or malicious use of WebSocket services.",
+          "recommendation": "Ensure that `setupWebSocket` implements robust authentication and authorization for all WebSocket connections, verifying client identity and permissions before allowing access to sensitive operations or data. This typically involves using tokens or session data validated upon connection."
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "Lack of CORS Configuration",
+          "impact": "Without explicit CORS configuration, the server might inadvertently allow cross-origin requests from any domain, which could be exploited in specific attack scenarios (e.g., if a private API is exposed). While sometimes default is open, explicit control is safer.",
+          "recommendation": "Implement a CORS middleware (e.g., `cors` package) to explicitly define allowed origins, methods, and headers. This ensures that only trusted frontends or applications can interact with the API, reducing the risk of cross-site request forgery (CSRF) or data leakage."
+        },
+        {
+          "riskLevel": "Low",
+          "name": "Generic Error Handling in Production",
+          "impact": "While `console.error` logs errors, in a production environment, generic error handling without specific error pages or robust error reporting can lead to leaking sensitive stack trace information to clients or obscure critical operational issues.",
+          "recommendation": "Implement a centralized Express error handling middleware to catch and process all application errors. In production, prevent sending detailed error messages or stack traces to clients. Instead, log errors with a proper logging library and return a generic, user-friendly error response."
+        }
+      ],
+      "optimizations": [
+        {
+          "type": "Architecture",
+          "suggestion": "Implement graceful shutdown for the HTTP server, WebSocket server, and any persistent database connections. This ensures that pending requests are completed and resources are released cleanly when the server receives termination signals (e.g., SIGTERM, SIGINT), preventing data loss and corruption."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "Replace `console.log` and `console.error` with a production-ready logging library (e.g., Winston, Pino). This allows for structured logging, different log levels, better log rotation, and integration with monitoring systems, significantly improving operational visibility and debugging."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "For high-traffic production environments, consider offloading static file serving (`express.static('dist')`) to a dedicated web server like Nginx or Caddy, or a Content Delivery Network (CDN). This frees up Node.js resources to handle dynamic API requests and improves static asset delivery speed."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Ensure that `initDb()` effectively manages database connections, including connection pooling, automatic reconnection strategies, and robust error handling for database failures. Proper connection management is crucial for application stability and performance under load."
+        }
+      ],
+      "reviewSummary": "The provided TypeScript code establishes a foundational Express.js server with integrated Vite for development and a WebSocket server. It demonstrates good modularity with separate concerns for routing, database, and WebSockets, contributing to decent readability and maintainability. The use of `async/await` and clear function names is commendable. However, the application lacks critical security hardening measures, most notably the absence of standard HTTP security headers (like those provided by Helmet.js) and no explicit CORS configuration, which poses a significant risk in production. WebSocket security is also an unaddressed concern given the external `setupWebSocket` function. Error handling, particularly for the HTTP server and general application errors, is rudimentary and could lead to crashes or exposure of sensitive information in production. Performance could benefit from more robust logging, graceful shutdown mechanisms, and potentially offloading static file serving for higher scale.",
+      "id": "15o53n0",
+      "date": "2026-07-09T09:28:46.001Z"
+    },
+    {
+      "project": "real",
+      "language": "TypeScript",
+      "code": "import express from 'express';\nimport { createServer as createViteServer } from 'vite';\nimport http from 'http';\nimport { WebSocketServer } from 'ws';\nimport { setupWebSocket } from './websocket_manager';\nimport authRoutes from './auth';\nimport analyticsRoutes from './analytics_engine';\nimport aiRoutes from './ai_engine';\nimport { initDb } from './database';\nimport net from 'net';\n\nasync function getFreePort(startPort: number): Promise<number> {\n  return new Promise((resolve) => {\n    const srv = net.createServer();\n    srv.listen(startPort, '0.0.0.0', () => {\n      const port = (srv.address() as net.AddressInfo).port;\n      srv.close(() => resolve(port));\n    });\n    srv.on('error', () => {\n      resolve(getFreePort(startPort + 1));\n    });\n  });\n}\n\nasync function startServer() {\n  const app = express();\n  const startPort = Number(process.env.PORT) || 3001;\n  const port = await getFreePort(startPort);\n\n  // Initialize DB\n  initDb();\n\n  app.use(express.json());\n\n  // API routes\n  app.use('/api/auth', authRoutes);\n  app.use('/api/analytics', analyticsRoutes);\n  app.use('/api/ai', aiRoutes);\n\n  app.get('/api/health', (req, res) => {\n    res.json({ status: 'ok' });\n  });\n\n  // Create HTTP server\n  const server = http.createServer(app);\n\n  // Setup WebSocket server\n  const wss = new WebSocketServer({ server });\n  setupWebSocket(wss);\n\n  // Vite middleware for development\n  if (process.env.NODE_ENV !== 'production') {\n    const hmrPort = await getFreePort(24678);\n    const vite = await createViteServer({\n      server: {\n        middlewareMode: true,\n        hmr: { port: hmrPort }\n      },\n      appType: 'spa',\n    });\n    app.use(vite.middlewares);\n  } else {\n    app.use(express.static('dist'));\n    // Fallback for SPA routing\n    app.get('*', (req, res) => {\n      res.sendFile('index.html', { root: 'dist' });\n    });\n  }\n\n  server.on('error', (e: any) => {\n    console.error(e);\n  });\n\n  server.on('listening', () => {\n    console.log(`Server running on http://localhost:${port}`);\n  });\n\n  server.listen(port, '0.0.0.0');\n}\n\nstartServer();\n",
+      "scores": {
+        "readability": 85,
+        "maintainability": 75,
+        "security": 45,
+        "performance": 65,
+        "overall": 68
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": 13,
+          "issue": "Recursive `getFreePort` can lead to stack overflow.",
+          "suggestedFix": "Refactor `getFreePort` to use an iterative loop rather than recursion, especially if many ports might be occupied, to prevent potential stack overflow issues under heavy load or specific network configurations. Ensure a maximum retry limit is also implemented."
+        },
+        {
+          "severity": "Medium",
+          "line": 30,
+          "issue": "`initDb()` error handling is missing.",
+          "suggestedFix": "Wrap `initDb()` in a try-catch block and handle potential database initialization errors gracefully. If database connectivity is critical, consider exiting the process or putting the server in a 'maintenance mode' rather than letting it start in a broken state. Make sure `initDb` is awaited if it's asynchronous."
+        },
+        {
+          "severity": "Low",
+          "line": 64,
+          "issue": "Generic error logging for `server.on('error')`.",
+          "suggestedFix": "While `console.error(e)` catches server errors, the type `any` for `e` is too broad. Implement more specific error handling and logging, potentially distinguishing between different types of errors (e.g., network errors, address in use) and providing more user-friendly messages, especially in production."
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "riskLevel": "High",
+          "name": "Missing Security Headers",
+          "impact": "Lack of security headers (e.g., Content-Security-Policy, X-Content-Type-Options, X-Frame-Options) can expose the application to various client-side attacks like XSS, clickjacking, and MIME-type sniffing.",
+          "recommendation": "Integrate a security middleware like `helmet` (https://www.npmjs.com/package/helmet) to automatically set essential HTTP security headers for all responses."
+        },
+        {
+          "riskLevel": "High",
+          "name": "Lack of Rate Limiting",
+          "impact": "API endpoints (`/api/auth`, `/api/analytics`, `/api/ai`) are not protected by rate limiting. This can lead to brute-force attacks on authentication, denial-of-service (DoS) attacks, or excessive resource consumption.",
+          "recommendation": "Implement rate limiting middleware (e.g., `express-rate-limit`) on all API endpoints, especially authentication and resource-intensive routes. Configure appropriate limits based on the expected usage pattern."
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "Potential Information Leakage in Error Logs",
+          "impact": "Using `console.error(e)` in production environments for uncaught errors can expose sensitive server-side information (e.g., stack traces, file paths, environment variables) to logs, which could be accessed by attackers.",
+          "recommendation": "Replace `console.error` with a production-grade logging solution (e.g., Winston, Pino) that can sanitize or redact sensitive information, provide structured logs, and integrate with log aggregation systems. Implement a global error handling middleware in Express to catch and log errors consistently without exposing raw stack traces to clients."
+        },
+        {
+          "riskLevel": "Low",
+          "name": "Undefined CORS Configuration",
+          "impact": "Without explicit CORS configuration, the application might either be too permissive (allowing requests from any origin) or too restrictive (blocking legitimate cross-origin requests). This could lead to security misconfigurations or operational issues.",
+          "recommendation": "Explicitly configure CORS middleware (e.g., `cors` package) to allow requests only from trusted origins. Define allowed methods and headers as necessary for your frontend application."
+        }
+      ],
+      "optimizations": [
+        {
+          "type": "Architecture",
+          "suggestion": "Implement a centralized error handling middleware for Express. This allows for consistent error logging, formatting, and sending appropriate error responses to clients across all API routes, improving maintainability and robustness."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "Add HTTP compression middleware (e.g., `compression`) to compress response bodies for static assets and API responses. This reduces bandwidth usage and improves load times for clients."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "Configure caching headers for static assets served in production (`express.static('dist')`). This can significantly improve performance for returning users by allowing browsers to cache resources efficiently."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Introduce a robust logging solution (e.g., Winston, Pino) instead of `console.log`/`console.error`. This provides structured logging, log levels, and better integration with monitoring systems, crucial for production environments."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Use a dedicated configuration management library (e.g., `dotenv`, `config`) for managing environment variables and application settings. This provides a more organized and secure way to handle configurations, especially for secrets."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "For `getFreePort`, consider using `portfinder` (https://www.npmjs.com/package/portfinder) or an iterative approach with `try-catch` on `server.listen` instead of recursive server creation/closing, which can be slightly less efficient, though the impact is mostly on startup time."
+        }
+      ],
+      "reviewSummary": "The provided TypeScript code sets up a basic Express server with WebSocket support and integrates a Vite development server. It demonstrates good modularity for routes and a clear separation of concerns. However, it significantly lacks critical security measures such as rate limiting and robust security headers, which are essential for any production-ready application. Error handling for database initialization and server errors could also be improved for better robustness and maintainability. Performance-wise, there are opportunities for optimization through compression and static asset caching. The overall scores reflect a functional but immature codebase, particularly in terms of security and advanced error management, requiring significant enhancements before deployment in a production environment.",
+      "id": "kocawss",
+      "date": "2026-07-09T06:34:49.127Z"
+    },
+    {
+      "project": "Awesome-Preference-Optimization-Algorithms",
+      "language": "TypeScript",
+      "code": "import express from 'express';\nimport { createServer as createViteServer } from 'vite';\nimport http from 'http';\nimport { WebSocketServer } from 'ws';\nimport { setupWebSocket } from './websocket_manager';\nimport authRoutes from './auth';\nimport analyticsRoutes from './analytics_engine';\nimport aiRoutes from './ai_engine';\nimport { initDb } from './database';\nimport net from 'net';\n\nasync function getFreePort(startPort: number): Promise<number> {\n  return new Promise((resolve) => {\n    const srv = net.createServer();\n    srv.listen(startPort, '0.0.0.0', () => {\n      const port = (srv.address() as net.AddressInfo).port;\n      srv.close(() => resolve(port));\n    });\n    srv.on('error', () => {\n      resolve(getFreePort(startPort + 1));\n    });\n  });\n}\n\nasync function startServer() {\n  const app = express();\n  const startPort = Number(process.env.PORT) || 3001;\n  const port = await getFreePort(startPort);\n\n  // Initialize DB\n  initDb();\n\n  app.use(express.json());\n\n  // API routes\n  app.use('/api/auth', authRoutes);\n  app.use('/api/analytics', analyticsRoutes);\n  app.use('/api/ai', aiRoutes);\n\n  app.get('/api/health', (req, res) => {\n    res.json({ status: 'ok' });\n  });\n\n  // Create HTTP server\n  const server = http.createServer(app);\n\n  // Setup WebSocket server\n  const wss = new WebSocketServer({ server });\n  setupWebSocket(wss);\n\n  // Vite middleware for development\n  if (process.env.NODE_ENV !== 'production') {\n    const hmrPort = await getFreePort(24678);\n    const vite = await createViteServer({\n      server: {\n        middlewareMode: true,\n        hmr: { port: hmrPort }\n      },\n      appType: 'spa',\n    });\n    app.use(vite.middlewares);\n  } else {\n    app.use(express.static('dist'));\n    // Fallback for SPA routing\n    app.get('*', (req, res) => {\n      res.sendFile('index.html', { root: 'dist' });\n    });\n  }\n\n  server.on('error', (e: any) => {\n    console.error(e);\n  });\n\n  server.on('listening', () => {\n    console.log(`Server running on http://localhost:${port}`);\n  });\n\n  server.listen(port, '0.0.0.0');\n}\n\nstartServer();\n",
+      "scores": {
+        "readability": 88,
+        "maintainability": 85,
+        "security": 68,
+        "performance": 75,
+        "overall": 79
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": 40,
+          "issue": "Potential race condition with database initialization.",
+          "suggestedFix": "The 'initDb()' function is called without 'await'. If 'initDb' is an asynchronous operation (which is common for database connections), subsequent route handlers might attempt to access the database before it's fully initialized, leading to errors. Ensure 'initDb' is awaited if it returns a Promise: 'await initDb();'. If 'initDb' is synchronous and sets up the connection, this is less of a concern but worth verifying."
+        },
+        {
+          "severity": "Low",
+          "line": 15,
+          "issue": "Recursive port finding without a termination condition or error propagation.",
+          "suggestedFix": "The 'getFreePort' function recursively calls itself on error. While this is a common pattern for finding a free port, it lacks an explicit maximum retry limit or a mechanism to signal failure if no port is found within a reasonable range. This could lead to an infinite loop or stack overflow if a large range of ports is unexpectedly unavailable. Consider adding a maximum number of retries or a specific upper port limit, and throwing an error if no port can be found after exhausting the options."
+        },
+        {
+          "severity": "Low",
+          "line": 70,
+          "issue": "Generic server error logging without specific handling.",
+          "suggestedFix": "The 'server.on(\"error\")' handler simply logs the error to the console. In a production environment, this might not be sufficient. Depending on the error, the application might need to attempt a graceful shutdown, notify an alerting system, or perform specific recovery actions. Generic error objects might also contain sensitive information (like stack traces) that should not be exposed directly in logs or to users. Implement a more robust error handling strategy, potentially using a dedicated logging library and distinguishing between different error types."
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "riskLevel": "Medium",
+          "name": "Missing Security Headers and Middleware",
+          "impact": "Lack of security headers can expose the application to common web vulnerabilities like XSS, clickjacking, and MIME-sniffing. Without middleware like 'helmet', default Express configurations may be less secure.",
+          "recommendation": "Integrate a security middleware like 'helmet' (or individual middlewares for specific headers) into your Express application. This helps set various HTTP headers to improve security, such as 'X-Content-Type-Options', 'X-Frame-Options', 'Strict-Transport-Security', 'X-DNS-Prefetch-Control', 'X-Permitted-Cross-Domain-Policies', and 'Referrer-Policy'. Also, explicitly configure CORS using the 'cors' middleware if your API is consumed by clients from different origins, ensuring proper 'Access-Control-Allow-Origin' settings."
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "Inadequate Input Validation and Sanitization",
+          "impact": "Although not directly visible in this snippet, the application integrates 'authRoutes', 'analyticsRoutes', and 'aiRoutes'. Without rigorous input validation and sanitization in these modules, the application could be vulnerable to various attacks, including SQL injection, NoSQL injection, XSS, command injection, and more, depending on the underlying implementations.",
+          "recommendation": "Ensure that all incoming data to 'authRoutes', 'analyticsRoutes', and 'aiRoutes' (and any other API endpoints) is thoroughly validated and sanitized. Use robust validation libraries (e.g., Joi, Yup, class-validator) for schemas and sanitize user-provided data before processing or storing it. Be especially careful with any data that might be used in database queries, file paths, or shell commands."
+        },
+        {
+          "riskLevel": "Low",
+          "name": "Potential Information Disclosure via Generic Error Logging",
+          "impact": "The generic error logging (e.g., 'console.error(e)') could potentially expose sensitive server details (stack traces, file paths, internal configurations) in production environments if not handled carefully.",
+          "recommendation": "For production, ensure that error messages displayed to users or written to publicly accessible logs do not contain sensitive information. Implement custom error handlers that return generic error messages to clients while logging detailed errors (with stack traces) to a secure, internal logging system. Consider using a dedicated logging library that supports different log levels and obfuscation for sensitive data."
+        },
+        {
+          "riskLevel": "Low",
+          "name": "Binding to '0.0.0.0' by Default",
+          "impact": "Binding to '0.0.0.0' makes the server accessible from any network interface on the machine. While this is standard for many server applications, in some specific deployment scenarios, it might be safer to bind only to '127.0.0.1' (localhost) or a specific internal IP address if the server is not intended to be directly exposed to the internet or external networks.",
+          "recommendation": "Review your deployment environment and security requirements. If the server should only be accessible locally or from specific internal networks, consider configuring it to listen on '127.0.0.1' or a specific internal IP address instead of '0.0.0.0'. Ensure that appropriate firewall rules are in place to restrict access to the server's port."
+        }
+      ],
+      "optimizations": [
+        {
+          "type": "Architecture",
+          "suggestion": "Implement graceful shutdown for the server, database, and WebSockets. Currently, the application simply exits if it receives a termination signal. A graceful shutdown would ensure all open connections are closed, pending requests are completed, and data is flushed before the process terminates, preventing data loss or inconsistent states. This typically involves listening for 'SIGINT' and 'SIGTERM' signals."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "Optimize 'getFreePort' efficiency. The current recursive approach can be slow if many ports are occupied. An alternative is to let the OS assign a random free port by listening on port '0' ('srv.listen(0, ...)') and then retrieving the assigned port. While this doesn't ensure a specific starting port, it's highly efficient for simply getting *any* free port."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Enhance logging with a dedicated library. Replacing 'console.log' and 'console.error' with a robust logging library like Winston or Pino will provide more control over log levels, formatting, transports (e.g., file, external service), and structured logging, which is crucial for monitoring and debugging in production environments."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Centralize configuration management. While environment variables are used, for larger applications, using a configuration management library (e.g., 'dotenv' for loading .env files, or 'config') can provide a more structured way to manage different settings (database connections, API keys, port numbers, etc.) across various environments (development, staging, production)."
+        }
+      ],
+      "reviewSummary": "The provided TypeScript code sets up a standard Express.js server with WebSocket support and integrates Vite for frontend development. The code is generally well-structured and readable, utilizing async/await effectively and separating concerns into distinct modules. Maintainability is good due to this modularity and a clear distinction between development and production environments. Performance seems adequate for a typical application of this type, with Vite being correctly confined to development mode. However, there are notable areas for improvement in security, particularly the lack of explicit security middleware (like Helmet) and generic error handling that could potentially expose sensitive information. Database initialization and port discovery also present minor potential bugs or inefficiencies. Implementing more robust security practices, a comprehensive logging solution, and graceful shutdown procedures would significantly enhance the application's overall quality and resilience.",
+      "id": "qvlm6vy",
+      "date": "2026-07-09T06:32:44.641Z"
+    },
+    {
+      "project": "AuthService",
+      "language": "JavaScript",
+      "code": "const {\n  Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell,\n  WidthType, ShadingType, BorderStyle, AlignmentType, PageBreak\n} = require(\"docx\");\n\nconst ACCENT = \"1E293B\";\nconst BLUE = \"2563EB\";\nconst LIGHT = \"F8FAFC\";\n\nfunction h1(text) {\n  return new Paragraph({ text, heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } });\n}\nfunction h2(text, color) {\n  return new Paragraph({\n    heading: HeadingLevel.HEADING_2,\n    spacing: { before: 300, after: 120 },\n    children: [new TextRun({ text, bold: true, color: color || BLUE })]\n  });\n}\nfunction body(text) {\n  return new Paragraph({ text, spacing: { after: 160 }, alignment: AlignmentType.LEFT });\n}\nfunction bullet(text) {\n  return new Paragraph({ text, bullet: { level: 0 }, spacing: { after: 80 } });\n}\nfunction qa(q, a) {\n  return [\n    new Paragraph({ spacing: { before: 120, after: 40 }, children: [new TextRun({ text: \"Q: \", bold: true, color: BLUE }), new TextRun({ text: q, bold: true })] }),\n    new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: \"A: \", bold: true }), new TextRun({ text: a })] })\n  ];\n}\nfunction divider() {\n  return new Paragraph({ text: \"\", border: { bottom: { color: \"CBD5E1\", space: 4, style: BorderStyle.SINGLE, size: 6 } }, spacing: { after: 300 } });\n}\n\nconst slides = [\n  {\n    n: 1, title: \"Title Slide — Inventory Management System\",\n    content: [\n      \"M.Sc. Computer Science • Project Viva\",\n      \"Inventory Management System — a full-stack solution for real-time inventory tracking, automated reporting, and secure business operations.\",\n      \"Core stack: React.js, Django REST Framework, PostgreSQL\",\n      \"Department of Computer Science, M.Sc. Final Year Project\"\n    ],\n    notes: \"Good morning/afternoon, respected panel. I am presenting my M.Sc. Computer Science project titled the Inventory Management System, a full-stack web application built with React.js on the frontend, Django REST Framework on the backend, and PostgreSQL as the relational database. Inventory management, in simple terms, is the process of tracking, controlling, and forecasting the flow of goods into, through, and out of a business, covering stock levels, warehouse locations, supplier orders, and sales. It sits at the core of retail, manufacturing, healthcare, and logistics operations, because even small errors in stock records can cause lost sales, excess holding costs, or stockouts. This project matters because most small and medium businesses still rely on spreadsheets or manual registers, which do not scale and are prone to human error. My system replaces that with a real-time, automated, and secure platform that gives role-based access to different stakeholders, administrators, staff, and suppliers, and produces live dashboards and analytical reports for faster, data-driven decisions. Over the next fifteen minutes, I will walk you through the problem this solves, the technology choices behind it, the system architecture, the core modules, the database design, the results achieved, and the future roadmap.\",\n    qas: [\n      [\"What is inventory management, and why is it important?\", \"It is the process of tracking, controlling, and forecasting stock as it moves into, through, and out of a business. It matters because inaccurate stock data directly causes lost sales, excess holding costs, and poor decision-making.\"],\n      [\"What business problem does this project solve?\", \"It replaces manual, error-prone, paper-based stock tracking with a real-time, automated, and secure digital platform, reducing errors and speeding up reporting.\"],\n      [\"Why did you choose a full-stack architecture instead of a simple script or spreadsheet macro?\", \"A full-stack web application supports multiple concurrent users, centralized data, role-based access, and scalability — none of which a spreadsheet or standalone script can provide.\"],\n      [\"Who are the intended users of this system?\", \"Administrators who manage products and view analytics, warehouse staff who update stock, and suppliers/procurement staff who coordinate purchase orders — each with role-appropriate access.\"],\n      [\"Is this project applicable to real businesses, or purely academic?\", \"It is directly applicable to small and medium enterprises that currently rely on manual or semi-digital processes; the core modules mirror what commercial inventory software provides.\"]\n    ],\n    design: [\n      \"Keep the current dark-navy title treatment; it already reads as a premium, professional cover slide.\",\n      \"Consider a subtle fade-in animation on the title and subtitle text for the live presentation (title first, then subtitle, then the three technology chips).\",\n      \"No structural changes needed — this slide is intentionally minimal by design.\"\n    ]\n  },\n  {\n    n: 2, title: \"Agenda / Presentation Roadmap\",\n    content: [\n      \"1. Introduction  2. Problem Statement  3. Objectives  4. Technology Stack\",\n      \"5. Architecture  6. Modules  7. Database  8. Results\",\n      \"9. Future Scope  10. Conclusion\"\n    ],\n    notes: \"This slide lays out the roadmap for the presentation, and each section builds logically on the one before it. I begin with the Introduction, which frames what inventory management means and why digital transformation matters for this domain. That naturally leads into the Problem Statement, where I contrast the pain points of manual systems with what automation can achieve. Once the problem is clear, I present the Objectives, the specific, measurable goals the project set out to achieve. The Technology Stack section then justifies every tool and framework chosen to meet those objectives. From there, Architecture explains how those technologies are wired together, followed by Modules, which breaks the system into its functional building blocks. Database covers the schema and relationships that make the modules work correctly together. Results shows the working system in action, Future Scope discusses where this can evolve, and I close with a Conclusion that ties the achievements back to the original problem statement. I have structured it this way deliberately, so that by the end, every technical decision can be traced back to a real business need.\",\n    qas: [\n      [\"Why did you structure the presentation in this particular order?\", \"It follows a logical narrative: problem, goals, technology, design, implementation, results, and future direction — mirroring how a real software project is planned and delivered.\"],\n      [\"Which section do you consider most important for a viva examiner?\", \"Architecture and Database, since they demonstrate the technical depth and design reasoning behind the implementation, not just the visible features.\"]\n    ],\n    design: [\n      \"The numbered roadmap grid is a strong, exam-appropriate layout — keep it as is.\",\n      \"Optionally animate each numbered item appearing in sequence as you speak through the agenda, reinforcing the flow without adding clutter.\"\n    ]\n  },\n  {\n    n: 3, title: \"Introduction / Project Overview\",\n    content: [\n      \"The Inventory Management System is a full-stack web application that streamlines how organizations track, manage, and forecast stock across warehouses.\",\n      \"It replaces manual, error-prone record-keeping with a real-time, automated platform.\",\n      \"Built on React.js, Django REST Framework, and PostgreSQL — providing role-based access, live dashboards, supplier coordination, and analytical reports.\",\n      \"Key results: 99.8% inventory accuracy • 70% process automation • 45% productivity gain\"\n    ],\n    notes: \"The Inventory Management System is a full-stack web application designed to digitally transform how organizations track, manage, and forecast stock across one or more warehouses. Traditionally, inventory management involved manual registers, physical stock counts, and delayed reporting, a process that is slow, error-prone, and difficult to audit. My system automates this entire lifecycle: from the moment goods are purchased from a supplier, through storage and stock adjustments, to the point of sale, every transaction is captured digitally and reflected instantly across the platform. Built on React.js for the frontend, Django REST Framework for the backend, and PostgreSQL for data storage, the system supports real-time tracking, role-based access control, supplier coordination, and detailed analytical reporting. Data entered once by any authorized user is instantly visible to everyone else who needs it, eliminating duplicate work and reconciliation errors. The statistics on this slide come from evaluating the system against the manual process it replaces. The 99.8% inventory accuracy reflects how closely recorded stock matches physical stock once automation removes manual transcription errors. The 70% process automation figure represents the proportion of previously manual tasks, like stock updates and report generation, that are now fully automated. The 45% productivity gain reflects the time staff save by not performing these tasks manually.\",\n    qas: [\n      [\"How exactly was the 99.8% accuracy figure measured?\", \"By comparing system-recorded stock quantities against physical stock counts across test scenarios after automation, versus the discrepancy rate typical of manual record-keeping.\"],\n      [\"What do you mean by 'digital transformation' in this context?\", \"Moving core business processes — stock entry, supplier coordination, reporting — from paper/spreadsheet-based methods to a centralized, real-time digital system.\"],\n      [\"What is the difference between automation and digitization?\", \"Digitization is converting paper records into digital form; automation goes further, having the system perform calculations, updates, and workflows without manual intervention, such as automatically decrementing stock on a sale.\"],\n      [\"Why is real-time tracking important for warehouse management?\", \"Because multiple transactions (sales, purchases, transfers) can happen simultaneously across warehouses; without real-time updates, different users could see conflicting or stale stock figures, leading to overselling or misallocation.\"]\n    ],\n    design: [\n      \"Add a small infographic beside the three stat callouts — e.g., a simple three-segment horizontal bar or three small icon-labeled circles (accuracy, automation, productivity) to visually anchor the numbers.\",\n      \"Keep the large bold percentage figures (60-72pt) as the focal point; do not add more than one supporting visual so the slide stays uncluttered.\"\n    ]\n  },\n  {\n    n: 4, title: \"Problem Statement\",\n    content: [\n      \"Existing System: manual, paper-based processes • frequent human errors • stock count mismatches • delayed, inaccurate reports\",\n      \"Proposed System: end-to-end automation • real-time stock tracking • instant accurate reports • secure role-based access • scalable cloud-ready design\",\n      \"Comparison Table: Existing vs. Proposed System (see Design Improvements)\"\n    ],\n    notes: \"Before justifying any solution, it is important to establish the problem clearly. Most existing inventory systems in small and medium enterprises are still manual or semi-manual, relying on paper registers, spreadsheets, or fragmented software that does not talk to each other. This creates four concrete issues. First, physical paper records are slow to update and easy to lose or damage. Second, manual data entry inevitably introduces human error, a misread quantity or a missed entry compounds over time. Third, these errors lead to stock count mismatches, where the system's recorded quantity does not match what is actually on the shelf, causing either lost sales from false stockouts or wasted capital from overstocking. Fourth, because data is not centralized, reports are generated manually and are often delayed and inaccurate by the time they reach decision-makers. My proposed system addresses every one of these directly. End-to-end automation removes manual data entry from routine transactions. Real-time stock tracking means every sale or purchase updates the central database immediately. Instant, accurate reporting means managers can pull analytics on demand rather than waiting days. Role-based access keeps sensitive operations restricted to authorized users, and the architecture is cloud-ready, so it can scale horizontally as transaction volume grows without a redesign.\",\n    qas: [\n      [\"Give a real-world example of a stock mismatch problem.\", \"A retailer's paper register shows 50 units in stock, but 5 were sold and not recorded promptly; a customer is told the item is available, leading to an oversell and a cancelled order — a direct revenue and trust loss.\"],\n      [\"Why do manual systems fail as a business scales?\", \"Manual processes rely on a fixed amount of human effort per transaction; as transaction volume grows, error rates and delays grow proportionally, while a digital system scales with minimal added effort per transaction.\"],\n      [\"What specifically makes the proposed system 'cloud-ready'?\", \"The backend is a stateless REST API decoupled from the frontend, and PostgreSQL supports standard cloud-hosted deployment (e.g., AWS RDS), so the same codebase can be deployed to cloud infrastructure without architectural changes.\"],\n      [\"How does role-based access reduce risk compared to a manual system?\", \"In a manual system, anyone with physical access to the register can alter records; in the digital system, only authenticated users with the correct role (e.g., admin) can perform sensitive actions like deleting a product or approving a purchase order.\"]\n    ],\n    design: [\n      \"Add a simple two-column comparison table: 'Existing System' vs 'Proposed System', row-matching each pain point to its corresponding solution (paper records → real-time tracking; human errors → automation; delayed reports → instant reports; no access control → role-based access).\",\n      \"Use a red-tinted icon/checkmark for 'Existing System' issues and a green-tinted icon/checkmark for 'Proposed System' benefits to reinforce the before/after contrast at a glance.\"\n    ]\n  },\n  {\n    n: 5, title: \"Objectives\",\n    content: [\n      \"Inventory Tracking — accurate, real-time stock records across warehouses\",\n      \"Stock Monitoring — continuous visibility to prevent shortages/overstock\",\n      \"Authentication — secure, role-based access to the system\",\n      \"Reports & Analytics — actionable insights from transactional data\",\n      \"Supplier Management — digitized procurement and purchase order tracking\",\n      \"Business Efficiency — reduced manual overhead, faster operations\"\n    ],\n    notes: \"This project was guided by six concrete objectives, each shaping specific design decisions. First, Inventory Tracking: maintaining an accurate, real-time record of stock quantities across multiple warehouses, so nothing is tracked twice or missed entirely. Second, Stock Monitoring: going beyond just recording numbers to actively watching for low-stock thresholds and unusual movement patterns, laying the groundwork for future alerting features. Third, Authentication: ensuring only verified, authorized users can access or modify data, implemented through Django's built-in authentication system extended with role-based permissions for administrators, staff, and suppliers. Fourth, Reports and Analytics: transforming raw transactional data into digestible insights, such as stock turnover rates and supplier performance, so managers can make informed decisions rather than guesses. Fifth, Supplier Management: digitizing the procurement side of the business, tracking vendor details and purchase orders so restocking is traceable end-to-end. And sixth, Business Efficiency, the overarching outcome of the previous five: reducing the manual overhead that traditionally consumed staff hours, freeing them for higher-value work. These objectives were not chosen arbitrarily, they map directly to the problems identified in the previous slide, and every module in the system exists to satisfy at least one of them.\",\n    qas: [\n      [\"How do these objectives map to the modules you built?\", \"Inventory Tracking and Stock Monitoring map to the Inventory module, Authentication to the Authentication module, Reports & Analytics to the Reports module, Supplier Management to the Suppliers module, and Business Efficiency is the combined outcome across all modules.\"],\n      [\"Which objective was hardest to achieve, and why?\", \"Reports & Analytics, because it required aggregating and correctly joining data across Products, Inventory, and Sales tables while keeping query performance acceptable as data volume grows.\"],\n      [\"How would you measure whether 'Business Efficiency' was actually achieved?\", \"By comparing time-to-complete for common tasks (e.g., generating a stock report) before and after automation — the 45% productivity gain figure quantifies this.\"],\n      [\"Are these objectives SMART (Specific, Measurable, Achievable, Relevant, Time-bound)?\", \"Largely yes — each is specific and relevant to a real problem, and most are measurable (accuracy %, automation %, response time), though 'time-bound' applied more to my project timeline than to the objectives themselves.\"]\n    ],\n    design: [\n      \"The six-card grid layout is clean and appropriately concise for slide viewing — keep it as is; the depth belongs in these speaker notes, not on the slide.\",\n      \"If more room is ever needed, a subtle SmartArt-style connector line from each objective card back to a small 'Business Efficiency' hub icon would visually reinforce that all objectives funnel into the final outcome.\"\n    ]\n  },\n  {\n    n: 6, title: \"Technology Stack\",\n    content: [\n      \"React.js — frontend UI library (component architecture, Virtual DOM)\",\n      \"Django + Python — backend web framework (MVT architecture)\",\n      \"Django REST Framework — REST API layer (JSON over HTTP)\",\n      \"PostgreSQL — relational database (ACID, normalization, complex queries)\",\n      \"HTML5 / CSS3 / JavaScript — page structure, styling, interactivity\",\n      \"Git & GitHub — version control and collaboration\"\n    ],\n    notes: \"The technology stack was chosen deliberately, balancing developer productivity, community support, and production readiness, not just familiarity. On the frontend, React.js was selected because of its component-based architecture and Virtual DOM. Instead of manipulating the actual browser DOM directly, which is slow, React maintains a lightweight in-memory representation and only updates the parts of the page that actually changed, giving a fast, responsive user interface even as inventory data updates frequently. Its component model also means UI elements like the product table or dashboard cards are reusable and independently testable. On the backend, Django was chosen for its batteries-included philosophy, it ships with an ORM, authentication, and an admin interface out of the box, which accelerated development. Paired with Django REST Framework, it exposes clean, standards-based REST APIs so the frontend and backend can evolve independently, communicating over HTTP using JSON payloads. PostgreSQL was chosen over alternatives like MySQL or SQLite because it offers strict ACID compliance, mature support for complex joins and constraints, and better handling of concurrent transactions, important where stock updates from multiple users must never conflict or lose data. HTML5, CSS3, and JavaScript underpin the frontend build itself, while Git and GitHub provided version control and collaborative development, letting me track every change, branch for features, and maintain a clean commit history throughout the project.\",\n    qas: [\n      [\"Why React instead of Angular or Vue?\", \"React's component reusability and Virtual DOM give strong performance with a comparatively gentle learning curve, and its large ecosystem (state management, UI libraries) suited the project's timeline and scope better than Angular's heavier framework or Vue's smaller enterprise adoption at the time.\"],\n      [\"What is the Virtual DOM and why does it matter here?\", \"It's an in-memory tree representation of the UI; React diffs it against the previous version and updates only the changed nodes in the real DOM, avoiding expensive full-page re-renders — valuable when stock figures update frequently.\"],\n      [\"What is Django's MVT architecture?\", \"Model-View-Template: the Model defines the database schema via the ORM, the View contains the business logic that processes requests, and the Template (or in this API-driven case, the Serializer/JSON response) defines how data is presented to the client.\"],\n      [\"Why REST instead of GraphQL?\", \"REST is simpler to implement and sufficient for this project's relatively fixed set of resources (products, inventory, suppliers); GraphQL's flexible querying adds complexity that isn't justified when the frontend's data needs are well-defined and stable.\"],\n      [\"Why PostgreSQL over MySQL or a NoSQL database like MongoDB?\", \"Inventory data is inherently relational — products belong to categories, purchases reference suppliers and products — so a relational database with strong constraint enforcement (PostgreSQL) is a better fit than a document store, and PostgreSQL specifically offers more advanced query and constraint features than MySQL.\"]\n    ],\n    design: [\n      \"Add a small comparison table beneath or beside the current stack grid: rows = React/Django/PostgreSQL/REST, columns = 'Alternative Considered' and 'Why This Was Chosen' — this directly visualizes the reasoning examiners will ask about.\",\n      \"Keep icons in colored circles for each technology as the visual motif; avoid adding logos of third-party frameworks if brand/logo usage isn't licensed for reuse — text + generic icon is safer and stays consistent with the existing design.\"\n    ]\n  },\n  {\n    n: 7, title: \"System Architecture\",\n    content: [\n      \"Flow: User → Browser → React (UI Layer) → REST API (HTTP/JSON) → Django (Business Logic) → PostgreSQL (Data Layer) → Response\",\n      \"Three-tier separation: Presentation, Business Logic, Data\",\n      \"REST API uses standard HTTP methods (GET, POST, PUT/PATCH, DELETE) and JSON payloads\",\n      \"Authentication and CRUD operations are enforced at the Django layer before reaching the database\"\n    ],\n    notes: \"This diagram illustrates the complete request-response cycle of the system, following a layered, three-tier architecture: presentation, business logic, and data. It begins when a user interacts with the application in their browser. The React frontend renders the UI layer and captures that action, for example, clicking Add Product. React then constructs an HTTP request and sends it across the REST API boundary. I chose REST specifically because it is stateless, uses standard HTTP methods, GET to retrieve data, POST to create, PUT or PATCH to update, and DELETE to remove, and exchanges data in JSON, a lightweight, human-readable format that both JavaScript and Python handle natively. That request reaches the Django backend, the business logic layer. Django REST Framework serializers validate and parse the incoming JSON, apply business rules, such as checking stock availability before confirming a sale, and, if the user is authenticated and authorized, pass the request to PostgreSQL. PostgreSQL, the data layer, executes the actual read or write and returns the result. Django serializes that result back into JSON, and the response travels back through the REST API to React, which updates only the relevant part of the UI using its Virtual DOM diffing. This separation of concerns means each layer can be scaled, tested, or replaced independently, for instance, the database could be migrated without touching the frontend at all.\",\n    qas: [\n      [\"Why is a layered architecture preferred over a monolithic script?\", \"It separates concerns so each layer (UI, business logic, data) can be developed, tested, scaled, and replaced independently — for example, the frontend could be rebuilt in a different framework without touching the backend or database.\"],\n      [\"How does authentication fit into this request-response cycle?\", \"Every API request (except login) carries a session or token credential; Django REST Framework authenticates the request before it reaches any view logic, and permission classes then check whether the authenticated user's role permits that specific action.\"],\n      [\"What are CRUD operations and where do they map onto HTTP methods?\", \"Create, Read, Update, Delete — mapped to POST (Create), GET (Read), PUT/PATCH (Update), and DELETE (Delete) respectively in the REST API.\"],\n      [\"Why JSON instead of XML for the API payload?\", \"JSON is more lightweight, has a simpler syntax, maps directly onto JavaScript objects and Python dictionaries, and is the de facto standard for modern REST APIs, reducing parsing overhead compared to XML.\"],\n      [\"What would happen if the database write failed halfway through a transaction?\", \"PostgreSQL's ACID-compliant transactions ensure atomicity — either the entire operation (e.g., decrementing inventory and recording a sale) commits together, or the whole transaction rolls back, so data is never left in a partially-updated, inconsistent state.\"]\n    ],\n    design: [\n      \"This vertical flow diagram is a clean, appropriate architecture visualization — keep the layered layout.\",\n      \"Consider adding small icons for each layer (browser icon, React logo-style icon, API icon, server icon, database cylinder) if not already present, to make the diagram instantly scannable for examiners glancing at it.\",\n      \"A subtle animation revealing each layer top-to-bottom as you narrate the request flow would work well in a live defense.\"\n    ]\n  },\n  {\n    n: 8, title: \"Major Modules\",\n    content: [\n      \"Authentication — secure login & role-based access control\",\n      \"Dashboard — real-time overview of key metrics\",\n      \"Products — manage catalog, pricing & categories\",\n      \"Inventory — live stock levels across warehouses\",\n      \"Suppliers — track vendors & purchase orders\",\n      \"Reports — analytics & exportable business reports\"\n    ],\n    notes: \"The application is organized into six major functional modules, each designed as an independent, cohesive unit that communicates with the others through the shared database and API layer. The Authentication module handles secure login and enforces role-based access control, so administrators, warehouse staff, and suppliers each see only the functionality relevant to their role. The Dashboard module aggregates data from every other module into a single real-time overview, total stock value, low-stock alerts, and recent activity, giving decision-makers a snapshot without digging through individual screens. The Products module manages the catalog: adding new items, setting prices, and organizing products into categories, which feeds directly into the Inventory module. The Inventory module tracks live stock levels per product, per warehouse, this is the operational core of the system, updated automatically whenever a purchase or sale is recorded. The Suppliers module manages vendor information and purchase orders, closing the loop on how stock enters the system. And the Reports module pulls data from Products, Inventory, and Sales to generate exportable analytics, such as stock turnover and supplier performance. The workflow is sequential in practice: a supplier record feeds a purchase, a purchase increases inventory, a sale decreases it, and the dashboard and reports reflect all of it in real time.\",\n    qas: [\n      [\"How do these six modules interact with each other?\", \"They share the same PostgreSQL database and REST API — a purchase recorded in Suppliers increases stock in Inventory, which is sourced from Products, and a sale (Reports/Sales data) decreases that same Inventory figure; the Dashboard aggregates all of it.\"],\n      [\"Which module was the most complex to implement, and why?\", \"The Inventory module, because it must stay consistent across concurrent operations — multiple purchases or sales updating the same product's stock simultaneously required careful use of database transactions to avoid race conditions.\"],\n      [\"Is each module a separate Django app?\", \"Yes — following Django's convention, each module (authentication, products, inventory, suppliers, reports) is organized as its own Django app with its own models, serializers, and views, which keeps the codebase modular and maintainable.\"],\n      [\"How would you add a new module, e.g., 'Returns Management', to this system?\", \"Create a new Django app with its own model (linking to Products and Sales via foreign keys), expose REST endpoints through a new serializer/viewset, and add a corresponding React component that consumes those endpoints — the modular design means existing modules would not need to change.\"]\n    ],\n    design: [\n      \"The icon + title + one-line description card layout per module is well-suited to slide viewing — keep it.\",\n      \"A small workflow diagram (Suppliers → Purchase → Inventory ← Sale ← Products, feeding into Dashboard/Reports) could be added as a secondary visual on this slide or as a bridge into the Architecture/Database slides, showing module interaction rather than just listing modules.\"\n    ]\n  },\n  {\n    n: 9, title: \"Database Design\",\n    content: [\n      \"Users (PK: id) — username, role, email\",\n      \"Categories (PK: id) — name, description\",\n      \"Products (PK: id, FK: category_id) — name, price\",\n      \"Suppliers (PK: id) — name, contact, address\",\n      \"Inventory (PK: id, FK: product_id) — quantity, warehouse\",\n      \"Purchases (PK: id, FK: supplier_id, product_id) — order_date\",\n      \"Sales (PK: id, FK: user_id, product_id) — sale_date\"\n    ],\n    notes: \"The database design follows standard relational modeling principles, normalization, primary keys, and foreign key constraints, to guarantee data integrity across seven core tables. Every table has a Primary Key, denoted PK, which uniquely identifies each row, for instance, every user has a unique id. Relationships between tables are enforced through Foreign Keys, denoted FK, which reference the primary key of another table. For example, the Products table has a category_id foreign key pointing to Categories, so every product must belong to a valid, existing category, the database itself rejects an invalid reference. The schema is normalized to at least Third Normal Form, meaning data is not duplicated unnecessarily, a supplier's contact details are stored once and referenced by id everywhere else, rather than copied into every Purchases record. Walking through the tables: Users stores login credentials and roles. Categories and Products define the catalog, linked by foreign key. Suppliers holds vendor details. Inventory tracks quantity per product per warehouse, linking back to Products. Purchases records incoming stock, linking Suppliers and Products with an order date. Sales records outgoing transactions, linking Users and Products with a sale date. This structure means data flows traceably in both directions, I can start from a single Sale and trace it back to the exact product, the user who processed it, and ultimately the supplier who originally provided that stock, which is essential for auditing and analytics.\",\n    qas: [\n      [\"What is normalization, and why does it matter here?\", \"Normalization organizes data to reduce redundancy and dependency — e.g., supplier details are stored once in the Suppliers table rather than repeated in every Purchase record — which prevents update anomalies and saves storage.\"],\n      [\"What is the difference between a Primary Key and a Foreign Key?\", \"A Primary Key uniquely identifies each row in its own table; a Foreign Key is a field in one table that references the Primary Key of another table, enforcing referential integrity between them.\"],\n      [\"What constraints did you apply beyond primary/foreign keys?\", \"NOT NULL constraints on mandatory fields (e.g., product name, price), unique constraints on fields like username and email, and default values where appropriate, such as a default role for new users.\"],\n      [\"How would you handle a product that has zero remaining category options — i.e., deleting a Category that still has Products linked to it?\", \"This is handled via the foreign key's on-delete behavior — either restricting deletion until products are reassigned, or cascading based on business rules; in this design, restrict is safer to avoid silently orphaning product records.\"],\n      [\"Could this schema be denormalized for performance, and would you do it?\", \"Yes, for read-heavy reporting queries, a denormalized reporting table or materialized view could reduce join overhead; I would only do this after profiling actual query performance, since premature denormalization risks data inconsistency.\"]\n    ],\n    design: [\n      \"The ER-style card layout showing each table with its fields is appropriately detailed for a database slide — keep it.\",\n      \"If you want a more formal ER Diagram, add connecting lines between related tables (Products→Categories, Inventory→Products, Purchases→Suppliers/Products, Sales→Users/Products) with crow's-foot or simple arrow notation to visually show the one-to-many relationships alongside the existing table cards.\"\n    ]\n  },\n  {\n    n: 10, title: \"Project Results / Interface Walkthrough\",\n    content: [\n      \"Login Page — secure, role-based authentication\",\n      \"Dashboard Overview — real-time key metrics\",\n      \"Product Management — full CRUD on catalog\",\n      \"Inventory — live stock levels per warehouse\",\n      \"Reports — exportable analytics\"\n    ],\n    notes: \"This slide walks through the working system's key interfaces, demonstrating that the architecture and modules discussed earlier function correctly end-to-end. The Login page enforces authentication, a user must provide valid credentials, and Django's session or token-based authentication verifies them before granting access, immediately applying role-based permissions. The Dashboard gives a real-time overview: total products, current stock value, and any low-stock warnings, all pulled live from the database rather than cached or static figures. The Product Management screen demonstrates full CRUD functionality, Create, Read, Update, and Delete, administrators can add a new product, view the existing catalog, edit pricing or category, or remove discontinued items, with every action immediately reflected through the REST API. The Inventory screen shows live stock quantities broken down by warehouse, updating instantly whenever a purchase or sale transaction is processed elsewhere in the system. The Reports screen generates and exports analytics, such as stock movement over time, pulling from the Products, Inventory, and Sales tables discussed in the database design. During testing, I verified each CRUD operation against expected outcomes, for example, confirming that deleting a product correctly handles related inventory records rather than leaving orphaned data behind, preserving referential integrity throughout.\",\n    qas: [\n      [\"How did you test these screens/functionality?\", \"Through manual functional testing of each CRUD operation on every module (e.g., create/edit/delete a product, process a sale, generate a report) and verifying the resulting database state matched expectations.\"],\n      [\"What testing methodology did you follow — unit, integration, or manual?\", \"Primarily manual functional and integration testing across the frontend-to-database flow for this project's scope, verifying that each user action produced the correct end-to-end result; this could be extended with automated unit tests (e.g., Django's TestCase, React Testing Library) as future work.\"],\n      [\"What happens if a user tries to delete a product that still has inventory records?\", \"The system enforces referential integrity — the delete either cascades appropriately or is restricted with a clear error message, preventing orphaned inventory records that would corrupt reporting data.\"],\n      [\"How do you know the dashboard figures are real-time and not cached/stale?\", \"The dashboard queries the database directly on each page load/refresh rather than reading from a static or long-lived cache, so any purchase or sale recorded elsewhere is reflected immediately.\"]\n    ],\n    design: [\n      \"Arrange the five screenshots (or screenshot placeholders) as a clean 2-3 grid with a one-line caption under each — this is already a natural interface-walkthrough layout.\",\n      \"Add a small numbered badge (1-5) on each screenshot corresponding to the order you'll narrate them in, helping you and the examiner follow the walkthrough sequence smoothly.\"\n    ]\n  },\n  {\n    n: 11, title: \"Future Enhancements\",\n    content: [\n      \"Barcode Scanning — faster stock intake and audits\",\n      \"QR Code Support — quick product lookup\",\n      \"Cloud Deployment — accessibility and scalability\",\n      \"AI Demand Prediction — proactive restocking\",\n      \"Mobile App — access for warehouse staff on the move\",\n      \"Analytics Dashboard — deeper business intelligence\",\n      \"Email Notifications — automatic low-stock/order alerts\"\n    ],\n    notes: \"While the current system meets all its stated objectives, I identified several high-value directions for future work, each addressing a limitation or extending the system's reach. Barcode Scanning and QR Code Support would replace manual product lookup with a camera-based scan, dramatically speeding up stock intake and physical audits, critical for warehouses handling high transaction volumes. Cloud Deployment, hosting the application on a platform like AWS or Azure, would improve accessibility from anywhere and provide built-in scalability and redundancy, rather than relying on a single local server. AI Demand Prediction is perhaps the most impactful extension: using historical sales data to train a forecasting model that predicts future demand and recommends reorder points before a stockout happens, moving the system from reactive to proactive. A Mobile App would extend the same REST API to a native or cross-platform app, letting warehouse staff update stock directly from the floor rather than returning to a desktop terminal. An enhanced Analytics Dashboard would add deeper business intelligence, trend visualizations and supplier performance scoring, beyond the current reports. And Email Notifications would automatically alert staff or managers when stock crosses a low threshold or a purchase order is fulfilled, closing the loop on the Stock Monitoring objective without requiring anyone to check manually.\",\n    qas: [\n      [\"Which future enhancement would you prioritize first, and why?\", \"Cloud Deployment, because it is a prerequisite for several other enhancements (mobile app access, reliable email notifications, multi-location scalability) and requires primarily configuration rather than new feature development.\"],\n      [\"What AI/ML technique would you use for demand prediction?\", \"A time-series forecasting approach, such as ARIMA or a simple regression/Prophet-style model trained on historical sales data per product, predicting near-future demand and recommended reorder points.\"],\n      [\"Why wasn't AI demand prediction implemented in the current scope?\", \"It requires a substantial volume of historical sales data to train a meaningfully accurate model, which wasn't yet available at this stage of the project's data collection, and was intentionally scoped as future work to keep the current deliverable focused and well-tested.\"],\n      [\"How would barcode scanning integrate with the existing architecture?\", \"A barcode/QR scan on a mobile device or scanner would simply populate the product lookup field with the decoded product ID, then call the same existing REST API endpoints already used for manual entry — no backend redesign required.\"]\n    ],\n    design: [\n      \"Convert the future-scope list into a horizontal roadmap/timeline visual (near-term → mid-term → long-term) instead of a flat grid — e.g., Barcode/QR and Email Notifications as near-term, Cloud Deployment and Mobile App as mid-term, AI Demand Prediction as long-term — this signals prioritization to examiners.\",\n      \"Keep icon-in-circle treatment consistent with the rest of the deck for each enhancement.\"\n    ]\n  },\n  {\n    n: 12, title: \"Conclusion\",\n    content: [\n      \"The system successfully delivers a modern, automated approach to inventory operations.\",\n      \"Automated Workflows • Secure Role-Based Access • Real-Time Reporting • Scalable Architecture • Improved Efficiency\",\n      \"Thank You — Questions?\"\n    ],\n    notes: \"In conclusion, this project set out to solve a genuine, widespread business problem, the inefficiency and error-proneness of manual inventory management, and I believe it succeeds in doing so. On the achievement front, the system delivers automated workflows that replace manual data entry, secure role-based access that protects sensitive operations, real-time reporting that gives managers immediate visibility, and an architecture built to scale as transaction volume grows. From a technical learning perspective, this project gave me hands-on, production-relevant experience across the full stack: designing a normalized relational schema in PostgreSQL, building and consuming REST APIs with Django REST Framework, and building a responsive, component-based frontend in React.js. I also gained practical experience with Git-based version control and structured, iterative development. From a business perspective, the measurable gains I demonstrated earlier, 99.8% inventory accuracy, 70% process automation, and 45% productivity improvement, show that these technical choices translate into real operational value, not just theoretical elegance. Looking ahead, the future scope items I outlined, barcode integration, cloud deployment, AI-based demand forecasting, and mobile access, mean this is not a closed, finished product but a foundation that can keep evolving alongside a growing business. Thank you for your time and attention. I would be happy to answer any questions the panel may have.\",\n    qas: [\n      [\"Summarize your project's key achievement in one sentence.\", \"It replaces a manual, error-prone inventory process with a real-time, automated, and secure full-stack system that measurably improves accuracy and efficiency.\"],\n      [\"What was the single biggest technical challenge you faced, and how did you solve it?\", \"Maintaining data consistency when concurrent purchase and sale transactions updated the same inventory record — solved using PostgreSQL's transactional integrity and Django's database-level locking/atomic operations.\"],\n      [\"If you had another six months, what would you build next?\", \"Cloud deployment followed by AI-based demand prediction, since together they would move the system from a reactive tool to a proactive decision-support platform.\"],\n      [\"What is the single most important thing you learned from this project?\", \"How to design and reason about a complete, production-style architecture end-to-end — not just writing code for one layer, but making deliberate, justifiable technology and design decisions at every layer and defending them.\"]\n    ],\n    design: [\n      \"Keep the dark closing slide with the five achievement chips as the strong final visual — it bookends nicely with the dark title slide (sandwich structure).\",\n      \"For the live defense, consider a brief 2-3 second pause after 'Thank You' before inviting questions, letting the closing statement land before Q&A begins.\"\n    ]\n  }\n];\n\nconst children = [];\n\nchildren.push(\n  new Paragraph({\n    alignment: AlignmentType.CENTER,\n    spacing: { after: 100 },\n    children: [new TextRun({ text: \"Inventory Management System\", bold: true, size: 56, color: ACCENT })]\n  }),\n  new Paragraph({\n    alignment: AlignmentType.CENTER,\n    spacing: { after: 400 },\n    children: [new TextRun({ text: \"M.Sc. Computer Science — Viva Defense Companion Guide\", size: 30, color: BLUE, bold: true })]\n  }),\n  new Paragraph({\n    alignment: AlignmentType.CENTER,\n    spacing: { after: 200 },\n    children: [new TextRun({ text: \"Expanded talking points, detailed speaker notes, viva Q&A, and design notes for all 12 slides.\", italics: true })]\n  }),\n  new Paragraph({\n    alignment: AlignmentType.CENTER,\n    spacing: { after: 600 },\n    children: [new TextRun({ text: \"Companion to: Inventory_Management_System_Enhanced.pptx (design unchanged; speaker notes embedded in the file itself).\", size: 20, color: \"64748B\" })]\n  }),\n  new Paragraph({ children: [new PageBreak()] })\n);\n\nslides.forEach((s, idx) => {\n  children.push(h1(`Slide ${s.n}: ${s.title}`));\n\n  children.push(h2(\"1. Improved Slide Content (on-screen)\"));\n  s.content.forEach(c => children.push(bullet(c)));\n\n  children.push(h2(\"2. Detailed Speaker Notes\"));\n  children.push(body(s.notes));\n\n  children.push(h2(\"3. Viva Questions & Answers\"));\n  s.qas.forEach(([q, a]) => qa(q, a).forEach(p => children.push(p)));\n\n  children.push(h2(\"4. Design Improvement Suggestions\"));\n  s.design.forEach(d => children.push(bullet(d)));\n\n  if (idx !== slides.length - 1) {\n    children.push(divider());\n    children.push(new Paragraph({ children: [new PageBreak()] }));\n  }\n});\n\nconst doc = new Document({\n  sections: [{\n    properties: { page: { size: { width: 12240, height: 15840 } } },\n    children\n  }],\n  styles: {\n    default: {\n      document: { run: { font: \"Calibri\", size: 22 } }\n    }\n  }\n});\n\nPacker.toBuffer(doc).then(buf => {\n  require(\"fs\").writeFileSync(\"/home/claude/Viva_Preparation_Companion_Guide.docx\", buf);\n  console.log(\"done\");\n});\n",
+      "scores": {
+        "readability": 90,
+        "maintainability": 80,
+        "security": 95,
+        "performance": 90,
+        "overall": 89
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": 194,
+          "issue": "Hardcoded and OS-specific file path for document output.",
+          "suggestedFix": "The output file path `/home/claude/Viva_Preparation_Companion_Guide.docx` is hardcoded and Unix-specific. This will cause issues or unexpected behavior when run on Windows or other operating systems, or if the specified user/directory does not exist or have write permissions. Use Node.js `path.join` for cross-platform compatibility (e.g., `require('path').join(__dirname, 'output.docx')`) or allow the path to be configured via environment variables or command-line arguments."
+        },
+        {
+          "severity": "Low",
+          "line": 194,
+          "issue": "Lack of error handling for file write operation.",
+          "suggestedFix": "The `writeFileSync` call is not wrapped in a `try-catch` block. If file system errors occur (e.g., insufficient permissions, disk full, invalid path), the script will crash without graceful handling. Implement a `try-catch` block around `writeFileSync` to log errors and prevent abrupt termination."
+        }
+      ],
+      "vulnerabilities": [],
+      "optimizations": [
+        {
+          "type": "Architecture",
+          "suggestion": "Extract 'magic numbers' into named constants for better readability and maintainability. Many values for spacing (`before`, `after`), font sizes (`size`), and border properties (`space`, `size`) are hardcoded directly into `Paragraph` and `TextRun` objects. Defining these as constants (e.g., `HEADING_1_BEFORE_SPACING = 400`, `BODY_AFTER_SPACING = 160`) would centralize style definitions, make the code easier to understand, and simplify future style adjustments across the document."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "While acceptable for a small, single-run script, consider using `fs.promises.writeFile` (or `fs.writeFile` with a callback) for asynchronous file writing instead of `fs.writeFileSync`. This is a general Node.js best practice for I/O operations to avoid blocking the event loop, although for this specific script's purpose, the performance impact is negligible."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Consolidate or parametrize redundant `docx` element creation. The `qa` function returns an array of two paragraphs, which then requires an inner `forEach` loop to push them. While minor, for similar patterns, a single function call could potentially create and push multiple elements more concisely or the `qa` function could directly add to the `children` array if it were passed as an argument, simplifying the call site."
+        }
+      ],
+      "reviewSummary": "The JavaScript code effectively uses the `docx` library to generate a detailed companion guide for a presentation. The structure is highly readable, leveraging well-named helper functions (`h1`, `body`, `qa`, etc.) to encapsulate document element creation, which significantly improves maintainability. The separation of content data (in the `slides` array) from the document generation logic is a strong design choice. Security is excellent due to the absence of external user input processing or dynamic code execution, mitigating common web vulnerabilities. Performance for its intended, static document generation purpose is also very good. The primary areas for improvement include addressing the hardcoded, OS-specific file path, implementing robust error handling for file operations, and extracting 'magic numbers' into constants for enhanced code clarity and easier style management.",
+      "id": "qftdndl",
+      "date": "2026-07-08T17:19:41.117Z"
+    },
+    {
+      "project": "AuthService",
+      "language": "TypeScript",
+      "code": "import express from 'express';\nimport { createServer as createViteServer } from 'vite';\nimport http from 'http';\nimport { WebSocketServer } from 'ws';\nimport { setupWebSocket } from './websocket_manager';\nimport authRoutes from './auth';\nimport analyticsRoutes from './analytics_engine';\nimport aiRoutes from './ai_engine';\nimport { initDb } from './database';\nimport net from 'net';\nimport helmet from 'helmet'; // Import helmet\n\nasync function getFreePort(startPort: number): Promise<number> {\n  return new Promise((resolve) => {\n    const srv = net.createServer();\n    srv.listen(startPort, '0.0.0.0', () => {\n      const port = (srv.address() as net.AddressInfo).port;\n      srv.close(() => resolve(port));\n    });\n    srv.on('error', () => {\n      resolve(getFreePort(startPort + 1));\n    });\n  });\n}\n\nasync function startServer() {\n  const app = express();\n  const startPort = Number(process.env.PORT) || 3001;\n  const port = await getFreePort(startPort);\n\n  // Initialize DB\n  initDb();\n\n  app.use(helmet()); // Add Helmet middleware to set common security headers\n  app.use(express.json());\n\n  // API routes\n  app.use('/api/auth', authRoutes);\n  app.use('/api/analytics', analyticsRoutes);\n  app.use('/api/ai', aiRoutes);\n\n  app.get('/api/health', (req, res) => {\n    res.json({ status: 'ok' });\n  });\n\n  // Create HTTP server\n  const server = http.createServer(app);\n\n  // Setup WebSocket server\n  const wss = new WebSocketServer({ server });\n  setupWebSocket(wss);\n\n  // Vite middleware for development\n  if (process.env.NODE_ENV !== 'production') {\n    const hmrPort = await getFreePort(24678);\n    const vite = await createViteServer({\n      server: {\n        middlewareMode: true,\n        hmr: { port: hmrPort }\n      },\n      appType: 'spa',\n    });\n    app.use(vite.middlewares);\n  } else {\n    app.use(express.static('dist'));\n    // Fallback for SPA routing\n    app.get('*', (req, res) => {\n      res.sendFile('index.html', { root: 'dist' });\n    });\n  }\n\n  server.on('error', (e: any) => {\n    // Log only the error message to prevent leaking sensitive server-side details like stack traces or file paths.\n    // In a production environment, consider using a dedicated logging library that can handle error serialization securely\n    // and integrate with monitoring tools.\n    console.error(`Server error: ${e.message || e}`);\n  });\n\n  server.on('listening', () => {\n    console.log(`Server running on http://localhost:${port}`);\n  });\n\n  server.listen(port, '0.0.0.0');\n}\n\nstartServer();\n",
+      "scores": {
+        "readability": 85,
+        "maintainability": 80,
+        "security": 100,
+        "performance": 75,
+        "overall": 85
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": "General",
+          "issue": "Asynchronous database initialization not awaited",
+          "suggestedFix": "If `initDb()` performs asynchronous operations (e.g., connecting to a database, running migrations), it should be defined as an `async` function and its call in `startServer` should be `await initDb();`. Failing to await it means the server might start processing requests before the database is fully ready, leading to runtime errors. If `initDb` is purely synchronous, this is not a bug, but typical database setup involves asynchronous operations."
+        },
+        {
+          "severity": "Low",
+          "line": 19,
+          "issue": "Potential for unhandled promise rejection in getFreePort recursion for non-EADDRINUSE errors",
+          "suggestedFix": "The `srv.on('error', ...)` callback only attempts to find the next port. If `net.createServer()` encounters an error other than 'EADDRINUSE' (e.g., system resource exhaustion, permission issues), the error might not be properly propagated or handled, potentially leading to an unhandled promise rejection or a crash. Consider adding more specific error checking or a `.catch()` around the recursive call within the promise to handle broader error types gracefully, or implement a maximum retry limit."
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "riskLevel": "Low",
+          "name": "Generic Error Logging",
+          "impact": "Using `console.error(e)` for server errors might log raw error objects that could contain sensitive server-side details (e.g., stack traces, file paths, database connection strings) in production logs. In some cases, this information could be accidentally exposed to clients.",
+          "recommendation": "Implement a centralized error handling middleware for Express that logs errors securely (redacting sensitive information) and sends generic, non-informative error messages to clients in a production environment. Consider using a dedicated logging library like Winston or Pino for structured and configurable logging."
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "WebSocket Security Reliance on External Module",
+          "impact": "The security of WebSocket connections is entirely dependent on the `setupWebSocket` function in `websocket_manager.ts`. Without seeing its implementation, there's a risk of vulnerabilities such as unauthenticated access, message flooding, injection attacks, or information disclosure if proper authentication, authorization, input validation, and rate limiting are not rigorously applied.",
+          "recommendation": "Thoroughly review `websocket_manager.ts` to ensure robust security measures are in place for WebSockets, including authentication (e.g., JWT-based), authorization for specific message types or actions, comprehensive input validation for all incoming messages, and rate limiting to prevent abuse. Always use WebSockets over TLS (WSS) in production."
+        }
+      ],
+      "optimizations": [
+        {
+          "type": "Performance",
+          "suggestion": "Implement a compression middleware (e.g., the 'compression' package for Express) to automatically compress HTTP responses. This can significantly reduce payload sizes for both API responses and static assets, leading to faster load times for clients."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "Enhance static asset caching in production. Configure `express.static` to send appropriate `Cache-Control` headers (e.g., `max-age`, `immutable`) for static files served from the 'dist' directory. This improves client-side performance by allowing browsers to cache assets effectively."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Implement a global error handling middleware for Express. This centralizes error responses, ensures consistent JSON formatting for API errors, and prevents accidental exposure of sensitive server details to clients, improving both security and user experience."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Add graceful shutdown logic to the server. Listen for `SIGTERM` and `SIGINT` signals (e.g., using a process manager like PM2 or Kubernetes) to allow the server to finish ongoing requests, properly close database connections, WebSocket connections, and other resources before exiting."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Integrate a dedicated logging library (e.g., Winston, Pino) instead of `console.log` and `console.error`. This enables structured logging, different log levels, easier filtering, and better integration with log aggregation and monitoring systems, which is crucial for production environments."
+        }
+      ],
+      "reviewSummary": "The provided TypeScript code establishes a solid foundation for an Express.js server, integrating WebSockets and Vite for development. Its clear structure, modular imports, and effective use of async/await contribute to high readability and maintainability. The `getFreePort` utility is a pragmatic solution for dynamic port allocation. However, the current implementation lacks explicit security hardening, particularly concerning HTTP security headers, CORS configuration, and robust error handling practices, which are vital for production readiness. Performance can be modestly improved through response compression and better static asset caching. The overall reliability and security of the application also heavily depend on the correct asynchronous handling of `initDb` and the secure implementation details within the imported modules for authentication, analytics, AI, and WebSocket management.",
+      "id": "wxwo68a",
+      "date": "2026-07-08T10:16:41.516Z"
+    },
+    {
+      "project": "AuthService",
+      "language": "TypeScript",
+      "code": "import express from 'express';\nimport { createServer as createViteServer } from 'vite';\nimport http from 'http';\nimport { WebSocketServer } from 'ws';\nimport { setupWebSocket } from './websocket_manager';\nimport authRoutes from './auth';\nimport analyticsRoutes from './analytics_engine';\nimport aiRoutes from './ai_engine';\nimport { initDb } from './database';\nimport net from 'net';\n\nasync function getFreePort(startPort: number): Promise<number> {\n  return new Promise((resolve) => {\n    const srv = net.createServer();\n    srv.listen(startPort, '0.0.0.0', () => {\n      const port = (srv.address() as net.AddressInfo).port;\n      srv.close(() => resolve(port));\n    });\n    srv.on('error', () => {\n      resolve(getFreePort(startPort + 1));\n    });\n  });\n}\n\nasync function startServer() {\n  const app = express();\n  const startPort = Number(process.env.PORT) || 3001;\n  const port = await getFreePort(startPort);\n\n  // Initialize DB\n  initDb();\n\n  app.use(express.json());\n\n  // API routes\n  app.use('/api/auth', authRoutes);\n  app.use('/api/analytics', analyticsRoutes);\n  app.use('/api/ai', aiRoutes);\n\n  app.get('/api/health', (req, res) => {\n    res.json({ status: 'ok' });\n  });\n\n  // Create HTTP server\n  const server = http.createServer(app);\n\n  // Setup WebSocket server\n  const wss = new WebSocketServer({ server });\n  setupWebSocket(wss);\n\n  // Vite middleware for development\n  if (process.env.NODE_ENV !== 'production') {\n    const hmrPort = await getFreePort(24678);\n    const vite = await createViteServer({\n      server: {\n        middlewareMode: true,\n        hmr: { port: hmrPort }\n      },\n      appType: 'spa',\n    });\n    app.use(vite.middlewares);\n  } else {\n    app.use(express.static('dist'));\n    // Fallback for SPA routing\n    app.get('*', (req, res) => {\n      res.sendFile('index.html', { root: 'dist' });\n    });\n  }\n\n  server.on('error', (e: any) => {\n    console.error(e);\n  });\n\n  server.on('listening', () => {\n    console.log(`Server running on http://localhost:${port}`);\n  });\n\n  server.listen(port, '0.0.0.0');\n}\n\nstartServer();\n",
+      "scores": {
+        "readability": 85,
+        "maintainability": 70,
+        "security": 40,
+        "performance": 80,
+        "overall": 65
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": 15,
+          "issue": "Incorrect Promise Resolution in getFreePort error handler. The `srv.on('error')` handler resolves with a Promise object itself (`getFreePort(...)`), not the resolved port number. This will cause downstream code expecting a number to receive a Promise, leading to unexpected behavior or errors if the initial port is in use and an error occurs.",
+          "suggestedFix": "Change `resolve(getFreePort(startPort + 1));` to `getFreePort(startPort + 1).then(resolve).catch(reject);` or, if `reject` is not used in the Promise constructor, just `getFreePort(startPort + 1).then(resolve);` to correctly propagate the resolved port."
+        },
+        {
+          "severity": "Medium",
+          "line": 30,
+          "issue": "Database initialization is not awaited. `initDb()` is called without `await`. If `initDb` is an asynchronous operation (which is common for database connections, migrations, etc.), the server might start listening and processing requests before the database is fully initialized, leading to 'database not ready' errors or unexpected behavior.",
+          "suggestedFix": "Change `initDb();` to `await initDb();`. Ensure `initDb` is indeed an `async` function and handles its own errors properly, or add a `try-catch` block around it for robust initialization."
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "riskLevel": "High",
+          "name": "Missing Security Headers (Helmet)",
+          "impact": "The application lacks essential security headers. Without middleware like `helmet`, the server is vulnerable to common web attacks such as XSS, clickjacking, MIME-type sniffing, and other browser-based vulnerabilities by not setting appropriate HTTP response headers (e.g., X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Strict-Transport-Security).",
+          "recommendation": "Integrate and configure `helmet` middleware early in the Express application stack: `import helmet from 'helmet'; app.use(helmet());` Review and customize its options as needed for your application's specific requirements."
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "Lack of Rate Limiting",
+          "impact": "There is no rate limiting implemented for API endpoints, especially for authentication routes (`/api/auth`). This makes the server vulnerable to brute-force attacks on login credentials, denial-of-service (DoS) attacks by flooding requests, and resource exhaustion.",
+          "recommendation": "Implement rate-limiting middleware (e.g., `express-rate-limit`) for all API routes, and especially for sensitive endpoints like login, registration, and password reset. Configure appropriate limits based on expected usage patterns and client types."
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "Incomplete CORS Configuration",
+          "impact": "The provided code does not explicitly configure Cross-Origin Resource Sharing (CORS). Depending on the default Express configuration and other potential middleware, this could either lead to an overly permissive CORS policy (allowing requests from any origin, which is a security risk) or an overly restrictive policy (blocking legitimate cross-origin requests).",
+          "recommendation": "Explicitly configure CORS middleware (e.g., `cors`) in your Express application. Define a whitelist of allowed origins if your frontend is served from a different domain or port: `import cors from 'cors'; app.use(cors({ origin: ['http://localhost:3000', 'https://yourfrontend.com'] }));`. Avoid `*` for origin in production."
+        },
+        {
+          "riskLevel": "Low",
+          "name": "Potential Information Disclosure in Error Logging",
+          "impact": "The server's global error handler for HTTP server errors (`server.on('error')`) directly logs the error object (`console.error(e)`). Depending on the error type, this could expose sensitive server-side details (e.g., stack traces, file paths, internal configurations) to standard output, which might be accessible to unauthorized parties in some deployment scenarios.",
+          "recommendation": "Implement a more robust and secure logging strategy. When logging errors in production, ensure that only necessary information is captured and sensitive details are redacted or omitted. Use a dedicated logging library (e.g., Winston, Pino) configured to handle different log levels and potentially send logs to a secure, centralized logging system."
+        }
+      ],
+      "optimizations": [
+        {
+          "type": "Architecture",
+          "suggestion": "Implement a graceful shutdown mechanism. Currently, the server process will terminate abruptly, potentially cutting off in-flight requests, leaving database connections open, or causing issues with WebSocket clients. A graceful shutdown allows the server to finish pending work before closing down connections cleanly upon receiving termination signals (e.g., SIGTERM)."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Integrate a structured logging solution. Replace basic `console.log`/`console.error` with a production-grade logging library like Winston or Pino. This allows for better log management, filtering, correlation, and integration with centralized logging systems, improving observability and debugging capabilities."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Centralize error handling with Express middleware. Implement a dedicated error handling middleware at the end of your Express route definitions (before the `app.listen()` call). This allows for consistent error responses, prevents unhandled exceptions from crashing the server, and can abstract error logging from specific route handlers."
+        },
+        {
+          "type": "Architecture",
+          "suggestion": "Enhance configuration management. While `process.env` is used, consider a library like `dotenv` for local development or a more comprehensive configuration system (e.g., `config`, `nconf`) to manage environment-specific settings, default values, and secrets more robustly and securely. This separates configuration from code and improves maintainability and security."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "Optimize `express.static` for production assets. For high-traffic production deployments, consider serving static assets through a dedicated Content Delivery Network (CDN) or a more performant web server (like Nginx) in front of Node.js, rather than relying solely on `express.static`. This can offload work from the Node.js process and improve content delivery speed."
+        }
+      ],
+      "reviewSummary": "The codebase provides a functional starting point for an Express.js application, integrating Vite for development and a WebSocket server. It demonstrates good modularity with separate route files and a clear asynchronous setup using `async/await`. However, it exhibits significant gaps in critical areas like security, robust error handling, and operational maintainability. Key vulnerabilities include missing security headers (Helmet), lack of rate limiting, and unconfigured CORS, which are fundamental for a secure web application. Furthermore, the absence of graceful shutdown, structured logging, and explicit configuration management will hinder the application's stability and diagnosability in a production environment. Addressing these points will significantly elevate the overall quality and resilience of the system.",
+      "id": "hnwfm0l",
+      "date": "2026-07-08T07:59:58.293Z"
+    },
+    {
+      "project": "PaymentGateway",
+      "language": "Python",
+      "code": "def login(user, password):\n    secret = \"pwd\"\n    if password == secret: return True",
+      "scores": {
+        "readability": 75,
+        "maintainability": 10,
+        "security": 5,
+        "performance": 95,
+        "overall": 46
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": 1,
+          "issue": "Unused 'user' parameter.",
+          "suggestedFix": "The 'user' parameter is accepted by the function but never used in the authentication logic. This indicates either a missing feature where user-specific authentication should occur or an unnecessary parameter. Integrate 'user' into a proper authentication lookup (e.g., fetching a password hash from a database for that user) or remove it if not intended for use."
+        },
+        {
+          "severity": "Medium",
+          "line": 3,
+          "issue": "Implicit None return for failed login.",
+          "suggestedFix": "If the password does not match the secret, the function implicitly returns `None`. For clarity and to prevent potential errors in calling code, explicitly `return False` in an `else` block."
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "riskLevel": "Critical",
+          "name": "Hardcoded Secret and Insecure Authentication",
+          "impact": "The 'secret' password is hardcoded directly into the function. This allows any attacker who knows this single hardcoded string to bypass authentication completely, as the `user` parameter is ignored. This is a severe vulnerability, enabling unauthorized access to any system protected by this login function.",
+          "recommendation": "Never hardcode sensitive information like passwords or secrets directly in code. Implement a robust authentication mechanism that retrieves user-specific credentials (e.g., a hashed password) from a secure data store (e.g., a database) based on the provided username. The `user` parameter is essential for this lookup."
+        },
+        {
+          "riskLevel": "Critical",
+          "name": "No Password Hashing",
+          "impact": "Even if the 'secret' were loaded from an external source, this code compares the provided password directly against a plaintext secret. In a real-world scenario, storing and comparing plaintext passwords makes the entire system vulnerable to data breaches. If the storage mechanism is compromised, all user passwords would be exposed.",
+          "recommendation": "Always store password *hashes* using strong, slow, and salting-enabled hashing algorithms like bcrypt or Argon2. Never store or compare plaintext passwords. When a user attempts to log in, hash the provided password with the user's unique salt and compare it to the stored hash."
+        },
+        {
+          "riskLevel": "High",
+          "name": "No Rate Limiting or Brute-Force Protection",
+          "impact": "There are no mechanisms in place to limit the number of login attempts. An attacker could perform an unlimited number of login attempts, making brute-force attacks trivial and highly likely to succeed if the secret were even slightly more complex.",
+          "recommendation": "Implement rate limiting (e.g., max X attempts per minute per IP address) and account lockout mechanisms (e.g., temporarily disable an account after Y failed attempts) to deter and mitigate brute-force attacks."
+        },
+        {
+          "riskLevel": "Medium",
+          "name": "Lack of Error Handling and Logging",
+          "impact": "The function provides no feedback beyond a boolean indicating success or failure. In a real application, failed login attempts (especially multiple ones) should be logged for security monitoring and auditing. Lack of proper error handling can mask attack attempts.",
+          "recommendation": "Implement logging for successful and failed login attempts. This helps detect suspicious activity (like brute-force attacks) and provides an audit trail. Consider returning more descriptive error codes or messages (without revealing too much information to an attacker)."
+        }
+      ],
+      "optimizations": [
+        {
+          "type": "Architecture",
+          "suggestion": "Completely refactor the authentication mechanism. This function should be replaced with a robust authentication system that integrates with a secure user database, uses modern password hashing, handles sessions/tokens securely, and incorporates security best practices like rate limiting."
+        },
+        {
+          "type": "Performance",
+          "suggestion": "While not a performance bottleneck in its current state, implementing proper password hashing (like bcrypt or Argon2) inherently introduces a deliberate computational cost. This is a security feature to make brute-forcing computationally expensive, which indirectly affects performance but is a crucial 'optimization' for security."
+        }
+      ],
+      "reviewSummary": "This `login` function is critically flawed from a security perspective and fundamentally unsuitable for any real-world application. The most severe issues include a hardcoded password, complete disregard for the 'user' parameter, and the absence of any secure password hashing. These flaws mean anyone knowing the simple hardcoded string can gain unauthorized access. While the code is simple and performs quickly, its maintainability and security scores are extremely low. It requires a complete architectural overhaul to incorporate secure authentication practices such as robust password hashing, database integration for user credentials, proper use of the 'user' identifier, and brute-force protection mechanisms. This code should not be deployed in any production environment.",
+      "id": "t2vtx66",
+      "date": "2026-07-07T19:35:28.015Z"
+    },
+    {
+      "id": "1",
+      "project": "AuthService",
+      "language": "Python",
+      "code": "# Sample AuthService Code\nimport os\nimport jwt\n\ndef generate_token(user_id):\n    # Mock authentication token generation\n    payload = {\"user_id\": user_id}\n    return jwt.encode(payload, \"secret-key\", algorithm=\"HS256\")\n",
+      "scores": {
+        "readability": 80,
+        "maintainability": 75,
+        "security": 70,
+        "performance": 85,
+        "overall": 78
+      },
+      "bugs": [
+        {
+          "severity": "Medium",
+          "line": 7,
+          "issue": "Hardcoded JWT secret key \"secret-key\" is insecure.",
+          "suggestedFix": "Use environment variables: os.environ.get(\"JWT_SECRET\")"
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "riskLevel": "High",
+          "name": "Information Disclosure / Key exposure",
+          "impact": "Hardcoded key allows token falsification.",
+          "recommendation": "Extract secret credentials to safe vaults or dotenv configuration."
+        }
+      ],
+      "optimizations": [
+        {
+          "type": "Architecture",
+          "suggestion": "Move encryption operations to a dedicated security module."
+        }
+      ],
+      "reviewSummary": "The authentication service uses standard libraries, but security is compromised due to hardcoded secrets. Readability is decent, and performance is optimal.",
+      "date": "2026-06-18T12:00:00.000Z"
+    },
+    {
+      "id": "2",
+      "project": "UserDashboard",
+      "language": "JavaScript",
+      "code": "function renderDashboard(user) {\n  const container = document.getElementById(\"dashboard\");\n  container.innerHTML = \"<h1>Welcome \" + user.name + \"</h1>\";\n}",
+      "scores": {
+        "readability": 95,
+        "maintainability": 95,
+        "security": 90,
+        "performance": 98,
+        "overall": 95
+      },
+      "bugs": [],
+      "vulnerabilities": [],
+      "optimizations": [],
+      "reviewSummary": "Clean code. No obvious bugs. Small potential for XSS if user name is not sanitised.",
+      "date": "2026-06-17T09:30:00.000Z"
+    },
+    {
+      "id": "3",
+      "project": "PaymentGateway",
+      "language": "Java",
+      "code": "import java.math.BigDecimal;\n\npublic class PaymentGateway {\n  public void process(BigDecimal amt) {\n    System.out.println(\"Processing amount: \" + amt);\n  }\n}",
+      "scores": {
+        "readability": 65,
+        "maintainability": 60,
+        "security": 80,
+        "performance": 65,
+        "overall": 68
+      },
+      "bugs": [
+        {
+          "severity": "High",
+          "line": 3,
+          "issue": "Floating point double shouldn't be used for currency values.",
+          "suggestedFix": "Use java.math.BigDecimal instead"
+        }
+      ],
+      "vulnerabilities": [],
+      "optimizations": [
+        {
+          "type": "Performance",
+          "suggestion": "Avoid System.out.println in production; replace with SLF4J / Logback logger."
+        }
+      ],
+      "reviewSummary": "Needs significant refactoring for precision safety and production-ready logging in currency management.",
+      "date": "2026-06-15T15:45:00.000Z"
+    }
+  ],
+  "team": [
+    {
+      "id": "zxi6hul",
+      "name": "prabanch1011",
+      "email": "prabanch1011@gmail.com",
+      "role": "Developer",
+      "status": "Pending"
+    },
+    {
+      "id": "hwdkq37",
+      "name": "prabanchs25mct037",
+      "email": "prabanchs25mct037@skasc.ac.in",
+      "role": "Developer",
+      "status": "Pending"
+    },
+    {
+      "id": "5ykr6jy",
+      "name": "ratheshr512",
+      "email": "ratheshr512@gmail.com",
+      "role": "Viewer",
+      "status": "Active"
+    }
+  ],
+  "profile": {
+    "displayName": "Jack",
+    "email": "prabanch1809@gmail.com",
+    "role": "Developer",
+    "twoFactorEnabled": true,
+    "emailAlerts": true
+  },
+  "apiUsageLogs": [
+    {
+      "id": "l1",
+      "timestamp": "2026-06-13T09:26:50.201Z",
+      "endpoint": "/api/analyze",
+      "inputTokens": 4000,
+      "outputTokens": 2400,
+      "cost": 0.12
+    },
+    {
+      "id": "l2",
+      "timestamp": "2026-06-14T09:26:50.201Z",
+      "endpoint": "/api/analyze",
+      "inputTokens": 3000,
+      "outputTokens": 1398,
+      "cost": 0.08
+    },
+    {
+      "id": "l3",
+      "timestamp": "2026-06-15T09:26:50.201Z",
+      "endpoint": "/api/analyze",
+      "inputTokens": 2000,
+      "outputTokens": 9800,
+      "cost": 0.24
+    },
+    {
+      "id": "l4",
+      "timestamp": "2026-06-16T09:26:50.201Z",
+      "endpoint": "/api/analyze",
+      "inputTokens": 2780,
+      "outputTokens": 3908,
+      "cost": 0.15
+    },
+    {
+      "id": "l5",
+      "timestamp": "2026-06-17T09:26:50.201Z",
+      "endpoint": "/api/analyze",
+      "inputTokens": 1890,
+      "outputTokens": 4800,
+      "cost": 0.13
+    },
+    {
+      "id": "l6",
+      "timestamp": "2026-06-18T09:26:50.201Z",
+      "endpoint": "/api/analyze",
+      "inputTokens": 2390,
+      "outputTokens": 3800,
+      "cost": 0.11
+    },
+    {
+      "id": "l7",
+      "timestamp": "2026-06-19T09:26:50.201Z",
+      "endpoint": "/api/analyze",
+      "inputTokens": 3490,
+      "outputTokens": 4300,
+      "cost": 0.18
+    },
+    {
+      "id": "ybfg0ct",
+      "timestamp": "2026-07-07T19:35:28.026Z",
+      "endpoint": "/api/analysis/jobs/",
+      "inputTokens": 352,
+      "outputTokens": 1147,
+      "cost": 0.0062
+    },
+    {
+      "id": "ph2ytm8",
+      "timestamp": "2026-07-08T07:59:58.295Z",
+      "endpoint": "/api/analysis/jobs/",
+      "inputTokens": 973,
+      "outputTokens": 1649,
+      "cost": 0.0095
+    },
+    {
+      "id": "l2dhf33",
+      "timestamp": "2026-07-08T10:16:41.519Z",
+      "endpoint": "/api/analysis/jobs/",
+      "inputTokens": 973,
+      "outputTokens": 1501,
+      "cost": 0.0087
+    },
+    {
+      "id": "07ylgv0",
+      "timestamp": "2026-07-08T17:19:41.119Z",
+      "endpoint": "/api/analysis/jobs/",
+      "inputTokens": 9942,
+      "outputTokens": 858,
+      "cost": 0.0167
+    },
+    {
+      "id": "m4nfnwv",
+      "timestamp": "2026-07-09T06:32:44.646Z",
+      "endpoint": "/api/analysis/jobs/",
+      "inputTokens": 973,
+      "outputTokens": 1799,
+      "cost": 0.0102
+    },
+    {
+      "id": "ez49fmk",
+      "timestamp": "2026-07-09T06:34:49.130Z",
+      "endpoint": "/api/analysis/jobs/",
+      "inputTokens": 973,
+      "outputTokens": 1433,
+      "cost": 0.0084
+    },
+    {
+      "id": "4y2y2sx",
+      "timestamp": "2026-07-09T06:35:38.484Z",
+      "endpoint": "/api/chat",
+      "inputTokens": 1988,
+      "outputTokens": 227,
+      "cost": 0.0036
+    },
+    {
+      "id": "em69ua5",
+      "timestamp": "2026-07-09T09:28:46.005Z",
+      "endpoint": "/api/analysis/jobs/",
+      "inputTokens": 973,
+      "outputTokens": 1321,
+      "cost": 0.0078
+    }
+  ],
+  "projects": [
+    {
+      "id": "1",
+      "name": "AuthService",
+      "description": "Enterprise auth provider microservice",
+      "repositories": [
+        {
+          "id": "1",
+          "name": "auth-service",
+          "git_url": "https://github.com/org/auth-service.git",
+          "branch": "main"
+        }
+      ],
+      "created_at": "2026-06-18T12:00:00.000Z"
+    },
+    {
+      "id": "2",
+      "name": "UserDashboard",
+      "description": "Portal frontend interface",
+      "repositories": [],
+      "created_at": "2026-06-17T09:30:00.000Z"
+    },
+    {
+      "id": "3",
+      "name": "PaymentGateway",
+      "description": "Payment integration service",
+      "repositories": [],
+      "created_at": "2026-06-15T15:45:00.000Z"
+    },
+    {
+      "id": "n5vhr52",
+      "name": "Awesome-Preference-Optimization-Algorithms",
+      "description": "",
+      "repositories": [
+        {
+          "id": "c7w055l",
+          "name": "awesome-preference-optimization-algorithms-repo",
+          "git_url": "https://github.com/ishandutta2007/Awesome-Preference-Optimization-Algorithms",
+          "branch": "main"
+        }
+      ],
+      "created_at": "2026-06-25T06:52:35.220Z"
+    },
+    {
+      "id": "0ty25zx",
+      "name": "Awesome-Preference-Optimization-Algorithms",
+      "description": "Preference Optimization Algorithms align Large Language Models (LLMs) with human values, safety guidelines, and task preferences (e.g., helpfulness, accuracy, and tone). Instead of training a model purely to predict the next token from raw data, preference optimization fine-tunes the model using feedback—often structured as comparisons between \"chosen\" (good) and \"rejected\" (bad) responses. This process shifts the model's output distribution toward desirable behaviors while suppressing hallucinations, toxic text, and unhelpful answers.\n\n",
+      "repositories": [
+        {
+          "id": "60b8a8k",
+          "name": "awesome-preference-optimization-algorithms-repo",
+          "git_url": "https://github.com/ishandutta2007/Awesome-Preference-Optimization-Algorithms",
+          "branch": "main"
+        }
+      ],
+      "created_at": "2026-06-25T06:53:29.588Z"
+    },
+    {
+      "id": "ueoo6u8",
+      "name": "real",
+      "description": "",
+      "repositories": [
+        {
+          "id": "2sbnsw0",
+          "name": "real-repo",
+          "git_url": "http://github.com/Prabanch06/real-time-AI-powered-health-analytics-dashboard-/tree/main/server",
+          "branch": "main"
+        }
+      ],
+      "created_at": "2026-07-09T06:34:23.566Z"
+    },
+    {
+      "id": "dzr03zm",
+      "name": "AI health Care",
+      "description": "Health care system",
+      "repositories": [
+        {
+          "id": "0en0k0k",
+          "name": "ai health care-repo",
+          "git_url": "https://github.com/Prabanch06/real-time-AI-powered-health-analytics-dashboard-.git",
+          "branch": "main"
+        }
+      ],
+      "created_at": "2026-07-09T09:28:19.291Z"
+    }
+  ],
+  "emails": [
+    {
+      "from": "system@bughunter.ai",
+      "to": "ratheshr512@gmail.com",
+      "subject": "[Invitation] Invitation to join BugHunter AI organization",
+      "body": "You have been invited to join the BugHunter AI workspace as a Developer.\n\nPlease accept the invitation here: http://localhost:3000/accept-invite?id=5ykr6jy\n\nBest regards,\nThe BugHunter Team",
+      "folder": "inbox",
+      "read": true,
+      "id": "qr8mdh4",
+      "date": "2026-07-09T07:08:39.234Z"
+    },
+    {
+      "from": "alex.chen@example.com",
+      "to": "ratheshr512@gmail.com",
+      "subject": "Invitation to join BugHunter AI organization",
+      "body": "You have been invited to join the BugHunter AI workspace as a Developer.\n\nPlease accept the invitation here: http://localhost:3000/accept-invite?id=5ykr6jy\n\nBest regards,\nThe BugHunter Team",
+      "folder": "sent",
+      "read": true,
+      "id": "g1es4qp",
+      "date": "2026-07-09T07:08:39.227Z"
+    },
+    {
+      "from": "system@bughunter.ai",
+      "to": "prabanchs25mct037@skasc.ac.in",
+      "subject": "[Invitation] Invitation to join BugHunter AI organization",
+      "body": "You have been invited to join the BugHunter AI workspace as a Admin.\n\nPlease accept the invitation here: http://localhost:3000/accept-invite?id=hwdkq37\n\nBest regards,\nThe BugHunter Team",
+      "folder": "inbox",
+      "read": false,
+      "id": "sfjixfx",
+      "date": "2026-07-09T06:48:48.144Z"
+    },
+    {
+      "from": "alex.chen@example.com",
+      "to": "prabanchs25mct037@skasc.ac.in",
+      "subject": "Invitation to join BugHunter AI organization",
+      "body": "You have been invited to join the BugHunter AI workspace as a Admin.\n\nPlease accept the invitation here: http://localhost:3000/accept-invite?id=hwdkq37\n\nBest regards,\nThe BugHunter Team",
+      "folder": "sent",
+      "read": true,
+      "id": "9u8kmem",
+      "date": "2026-07-09T06:48:48.137Z"
+    },
+    {
+      "from": "system@bughunter.ai",
+      "to": "prabanch1011@gmail.com",
+      "subject": "[Invitation] Invitation to join BugHunter AI organization",
+      "body": "You have been invited to join the BugHunter AI workspace as a Developer.\n\nPlease accept the invitation here: http://localhost:3000/accept-invite?id=zxi6hul\n\nBest regards,\nThe BugHunter Team",
+      "folder": "inbox",
+      "read": false,
+      "id": "q44hh5s",
+      "date": "2026-07-09T06:36:18.286Z"
+    },
+    {
+      "from": "alex.chen@example.com",
+      "to": "prabanch1011@gmail.com",
+      "subject": "Invitation to join BugHunter AI organization",
+      "body": "You have been invited to join the BugHunter AI workspace as a Developer.\n\nPlease accept the invitation here: http://localhost:3000/accept-invite?id=zxi6hul\n\nBest regards,\nThe BugHunter Team",
+      "folder": "sent",
+      "read": true,
+      "id": "4er4lvj",
+      "date": "2026-07-09T06:36:18.279Z"
+    },
+    {
+      "from": "alex.chen@example.com",
+      "to": "prabanch1809@gmail.com",
+      "subject": "[BugHunter AI] Scan Report for Project: Needs Review",
+      "body": "Hi Jack,\n\nYour BugHunter AI security scan has completed for project reference #qvlm6vy.\n\n--- OVERALL RATING: 67/100 ---\n• Readability: 81/100\n• Maintainability: 85/100\n• Security: 40/100\n• Performance: 75/100\n\n--- DETECTED BUGS (3) ---\n1. Severity: Medium | Issue: Potential race condition with database initialization. (Suggested Fix: The 'initDb()' function is called without 'await'. If 'initDb' is an asynchronous operation (which is common for database connections), subsequent route handlers might attempt to access the database before it's fully initialized, leading to errors. Ensure 'initDb' is awaited if it returns a Promise: 'await initDb();'. If 'initDb' is synchronous and sets up the connection, this is less of a concern but worth verifying.)\n2. Severity: Low | Issue: Recursive port finding without a termination condition or error propagation. (Suggested Fix: The 'getFreePort' function recursively calls itself on error. While this is a common pattern for finding a free port, it lacks an explicit maximum retry limit or a mechanism to signal failure if no port is found within a reasonable range. This could lead to an infinite loop or stack overflow if a large range of ports is unexpectedly unavailable. Consider adding a maximum number of retries or a specific upper port limit, and throwing an error if no port can be found after exhausting the options.)\n3. Severity: Low | Issue: Generic server error logging without specific handling. (Suggested Fix: The 'server.on(\"error\")' handler simply logs the error to the console. In a production environment, this might not be sufficient. Depending on the error, the application might need to attempt a graceful shutdown, notify an alerting system, or perform specific recovery actions. Generic error objects might also contain sensitive information (like stack traces) that should not be exposed directly in logs or to users. Implement a more robust error handling strategy, potentially using a dedicated logging library and distinguishing between different error types.)\n\n--- VULNERABILITIES (4) ---\n1. Risk: Medium | Security: Missing Security Headers and Middleware: Lack of security headers can expose the application to common web vulnerabilities like XSS, clickjacking, and MIME-sniffing. Without middleware like 'helmet', default Express configurations may be less secure.\n2. Risk: Medium | Security: Inadequate Input Validation and Sanitization: Although not directly visible in this snippet, the application integrates 'authRoutes', 'analyticsRoutes', and 'aiRoutes'. Without rigorous input validation and sanitization in these modules, the application could be vulnerable to various attacks, including SQL injection, NoSQL injection, XSS, command injection, and more, depending on the underlying implementations.\n3. Risk: Low | Security: Potential Information Disclosure via Generic Error Logging: The generic error logging (e.g., 'console.error(e)') could potentially expose sensitive server details (stack traces, file paths, internal configurations) in production environments if not handled carefully.\n4. Risk: Low | Security: Binding to '0.0.0.0' by Default: Binding to '0.0.0.0' makes the server accessible from any network interface on the machine. While this is standard for many server applications, in some specific deployment scenarios, it might be safer to bind only to '127.0.0.1' (localhost) or a specific internal IP address if the server is not intended to be directly exposed to the internet or external networks.\n\n--- SUMMARY ---\nThe provided TypeScript code sets up a standard Express.js server with WebSocket support and integrates Vite for frontend development. The code is generally well-structured and readable, utilizing async/await effectively and separating concerns into distinct modules. Maintainability is good due to this modularity and a clear distinction between development and production environments. Performance seems adequate for a typical application of this type, with Vite being correctly confined to development mode. However, there are notable areas for improvement in security, particularly the lack of explicit security middleware (like Helmet) and generic error handling that could potentially expose sensitive information. Database initialization and port discovery also present minor potential bugs or inefficiencies. Implementing more robust security practices, a comprehensive logging solution, and graceful shutdown procedures would significantly enhance the application's overall quality and resilience.\n\nRegards,\nBugHunter AI Scanner Agent",
+      "folder": "sent",
+      "read": true,
+      "id": "1oxaows",
+      "date": "2026-07-09T06:33:22.328Z"
+    },
+    {
+      "id": "e1",
+      "from": "system@bughunter.ai",
+      "to": "alex.chen@example.com",
+      "subject": "Welcome to BugHunter AI!",
+      "body": "Hi Alex,\n\nWelcome to BugHunter AI! We are thrilled to have you on board. You can start scanning your source code repositories immediately under the \"New Analysis\" tab.\n\nBest regards,\nThe BugHunter Team",
+      "date": "2026-07-02T19:32:15.613Z",
+      "folder": "inbox",
+      "read": true
+    },
+    {
+      "id": "e2",
+      "from": "alerts@bughunter.ai",
+      "to": "alex.chen@example.com",
+      "subject": "[SECURITY ALERT] Hardcoded Secret Key Found",
+      "body": "Hi Alex,\n\nA high-severity vulnerability was identified in the project \"AuthService\". A hardcoded JWT secret key was found in file \"main.py\" at line 7.\n\nPlease update the file immediately using environment variables or a secrets manager.\n\nView details: http://localhost:3000/history",
+      "date": "2026-07-05T19:32:15.613Z",
+      "folder": "inbox",
+      "read": true
+    },
+    {
+      "id": "e3",
+      "from": "sarah.m@example.com",
+      "to": "alex.chen@example.com",
+      "subject": "Sarah Miller accepted your team invitation",
+      "body": "Sarah Miller has accepted your invitation to join the BugHunter organization as a Developer.\n\nShe is now listed as an Active member on the Team Management page.",
+      "date": "2026-07-06T19:32:15.613Z",
+      "folder": "inbox",
+      "read": true
+    },
+    {
+      "id": "e4",
+      "from": "alex.chen@example.com",
+      "to": "elena.r@example.com",
+      "subject": "Invitation to join BugHunter AI organization",
+      "body": "You have been invited to join the BugHunter AI workspace as a Viewer.\n\nPlease accept the invitation here: http://localhost:3000/accept-invite?id=4",
+      "date": "2026-07-06T19:32:15.613Z",
+      "folder": "sent",
+      "read": true
+    }
+  ]
+}
