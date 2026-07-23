@@ -108,8 +108,20 @@ app.all('/api/auth/*', async (req, res) => {
       url: targetUrl,
       headers: headers,
       data: req.body,
+      maxRedirects: 0,
       validateStatus: () => true // Prevent axios from throwing on non-200 responses
     });
+
+    // Copy Set-Cookie headers from Django response to Express response
+    const setCookie = response.headers['set-cookie'];
+    if (setCookie) {
+      res.setHeader('set-cookie', setCookie);
+    }
+
+    // Copy Location header for redirects
+    if (response.headers.location) {
+      res.setHeader('Location', response.headers.location);
+    }
 
     res.status(response.status).send(response.data);
   } catch (error: any) {

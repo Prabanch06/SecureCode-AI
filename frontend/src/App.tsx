@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Code, History, Settings, Menu, X, Shield, Zap, Users, ActivitySquare, ShieldAlert, BarChart3, Sun, Moon, Mail, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { AutoLogout } from './components/AutoLogout';
 import { CodeAnalyzer } from './components/CodeAnalyzer';
 import { Dashboard } from './components/Dashboard';
@@ -16,6 +16,7 @@ import { EmailHub } from './components/EmailHub';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
 import api from './lib/api';
+import axios from 'axios';
 
 type Page = 'dashboard' | 'analyze' | 'history' | 'team' | 'api-usage' | 'settings' | 'profile' | 'security' | 'tech-debt' | 'team-analytics' | 'email-hub';
 
@@ -32,28 +33,49 @@ export default function App() {
   const [authChecking, setAuthChecking] = useState<boolean>(true);
 
   useEffect(() => {
-    const checkAuth = async () => {
+    const initAuth = async () => {
+      // 1. Check if we already have a JWT token in local storage
       const token = localStorage.getItem('access_token');
-      if (!token) {
-        setAuthChecking(false);
-        return;
+      if (token) {
+        try {
+          const res = await api.get('/api/auth/profile/');
+          setUser({ 
+            id: res.data.id, 
+            username: res.data.username, 
+            email: res.data.email, 
+            role: res.data.profile?.role 
+          });
+          setIsAuthenticated(true);
+          setAuthChecking(false);
+          return;
+        } catch (err) {
+          console.error('Token verification failed, checking session...', err);
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+        }
       }
+
+      // 2. Check if we have an active backend session (e.g. redirected back from django-allauth callback)
       try {
-        const res = await api.get('/api/auth/profile/');
-        setUser({ 
-          id: res.data.id, 
-          username: res.data.username, 
-          email: res.data.email, 
-          role: res.data.profile?.role 
+        const res = await axios.get('/api/auth/oauth/session-jwt/');
+        localStorage.setItem('access_token', res.data.access);
+        localStorage.setItem('refresh_token', res.data.refresh);
+        setUser({
+          id: res.data.user.id,
+          username: res.data.user.username,
+          email: res.data.user.email,
+          role: res.data.user.role
         });
         setIsAuthenticated(true);
-      } catch (err) {
-        console.error('Initial authentication check failed:', err);
+        toast.success('Successfully logged in with GitHub!');
+      } catch (sessionErr) {
+        console.log('No active Django session found.');
       } finally {
         setAuthChecking(false);
       }
     };
-    checkAuth();
+
+    initAuth();
   }, []);
 
   const handleLogout = async () => {
@@ -79,6 +101,8 @@ export default function App() {
       root.classList.remove('dark');
     }
   }, [darkMode]);
+
+
 
   if (authChecking) {
     return (

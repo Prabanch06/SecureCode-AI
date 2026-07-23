@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Mail, Lock, ShieldAlert, User, Eye, Shield } from 'lucide-react';
+import { Mail, Lock, ShieldAlert, User, Eye, Shield, Github } from 'lucide-react';
+import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import api from '../lib/api';
 
@@ -14,6 +15,9 @@ export function Register({ onRegisterSuccess, onNavigateToLogin }: RegisterProps
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const handleGithubLogin = () => {
+    window.location.href = '/api/auth/accounts/github/login/';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,6 +145,23 @@ export function Register({ onRegisterSuccess, onNavigateToLogin }: RegisterProps
                 )}
               </motion.button>
             </form>
+
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-slate-200"></div>
+              <span className="flex-shrink mx-4 text-slate-400 text-xs">Or continue with</span>
+              <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              type="button"
+              onClick={handleGithubLogin}
+              className="w-full py-4 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+            >
+              <Github className="w-5 h-5 text-slate-900" />
+              <span>Sign up with GitHub</span>
+            </motion.button>
 
             <div className="pt-2 text-center text-sm text-slate-400">
               Already have an account?{' '}

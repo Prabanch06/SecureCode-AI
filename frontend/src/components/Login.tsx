@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, ShieldAlert, User, Eye, Shield, ArrowLeft, KeyRound, Mail, CheckCircle2 } from 'lucide-react';
+import { Lock, ShieldAlert, User, Eye, Shield, ArrowLeft, KeyRound, Mail, CheckCircle2, Github } from 'lucide-react';
 import { motion } from 'motion/react';
 import api from '../lib/api';
 import { toast } from 'sonner';
@@ -15,6 +15,9 @@ export function Login({ onLoginSuccess, onNavigateToRegister }: LoginProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const handleGithubLogin = () => {
+    window.location.href = '/api/auth/accounts/github/login/';
+  };
 
   // Forgot password flow states
   const [isForgotPassword, setIsForgotPassword] = useState(false);
@@ -343,6 +346,23 @@ export function Login({ onLoginSuccess, onNavigateToRegister }: LoginProps) {
                     )}
                   </motion.button>
                 </form>
+
+                <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-slate-200"></div>
+                  <span className="flex-shrink mx-4 text-slate-400 text-xs">Or continue with</span>
+                  <div className="flex-grow border-t border-slate-200"></div>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={handleGithubLogin}
+                  className="w-full py-4 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+                >
+                  <Github className="w-5 h-5 text-slate-900" />
+                  <span>Sign in with GitHub</span>
+                </motion.button>
 
                 <div className="pt-2 text-center text-sm text-slate-400">
                   Don't have an account?{' '}
